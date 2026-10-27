@@ -201,59 +201,68 @@
                     app:tint="@color/accent_blue" />
 
                 <TextView
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="10dp"
+                    android:layout_weight="1"
                     android:text="Blocos de Horário (ScreenZen)"
                     android:textColor="@color/text_white"
                     android:textSize="15sp"
                     android:textStyle="bold" />
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switchSchedule"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
             </LinearLayout>
 
             <TextView
+                android:id="@+id/tvScheduleName"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="Configure horários automáticos para bloquear apps durante o trabalho ou estudo."
+                android:layout_marginTop="8dp"
+                android:text="Horário: 09:00 às 18:00"
+                android:textColor="@color/text_white"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvScheduleDays"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="Dias: Seg, Ter, Qua, Qui, Sex"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:gravity="center_vertical"
+                android:layout_marginTop="10dp"
                 android:orientation="horizontal">
 
-                <LinearLayout
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnEditSchedule"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:orientation="vertical">
+                    android:layout_marginEnd="6dp"
+                    android:text="Editar Horário"
+                    android:textColor="@color/accent_blue"
+                    app:cornerRadius="8dp"
+                    app:strokeColor="@color/accent_blue" />
 
-                    <TextView
-                        android:id="@+id/tvScheduleName"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Horário de Foco: 09:00 às 18:00"
-                        android:textColor="@color/text_white"
-                        android:textSize="14sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/tvScheduleDays"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="Dias: Seg, Ter, Qua, Qui, Sex"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="12sp" />
-                </LinearLayout>
-
-                <androidx.appcompat.widget.SwitchCompat
-                    android:id="@+id/switchSchedule"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSelectApps"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Escolher Apps"
+                    android:textColor="@color/accent_blue"
+                    app:cornerRadius="8dp"
+                    app:strokeColor="@color/accent_blue" />
             </LinearLayout>
         </LinearLayout>
 

@@ -2,9 +2,12 @@ package com.focuslock.app
 
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.PendingIntent
+import android.app.TimePickerDialog
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.os.Build
@@ -18,6 +21,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.focuslock.app.databinding.ActivityMainBinding
+import java.util.Calendar
 
 class MainActivity : AppCompatActivity() {
 
@@ -40,6 +44,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         checkAccessibilityPermission()
+        checkNfcStatus()
         updateUI()
 
         nfcAdapter?.let {
@@ -62,6 +67,14 @@ class MainActivity : AppCompatActivity() {
             0
         }
         pendingIntent = PendingIntent.getActivity(this, 0, intent, flags)
+    }
+
+    private fun checkNfcStatus() {
+        nfcAdapter?.let {
+            if (!it.isEnabled) {
+                Toast.makeText(this, "NFC desligado. Ative nas configurações para usar sua tag.", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -93,7 +106,6 @@ class MainActivity : AppCompatActivity() {
 
         val registered = prefs.registeredNfcTagId
         if (registered == null || registered == tagId) {
-            // Alterna o estado de bloqueio
             prefs.isManualLockActive = !prefs.isManualLockActive
             val msg = if (prefs.isManualLockActive) "Modo Foco Ativado via NFC!" else "Modo Foco Desativado via NFC!"
             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
@@ -106,10 +118,8 @@ class MainActivity : AppCompatActivity() {
     private fun setupListeners() {
         binding.btnToggleLock.setOnClickListener {
             if (prefs.isManualLockActive) {
-                // Para desbloquear manualmente, EXIGE a Senha Mestre!
                 promptPinToUnlock()
             } else {
-                // Para bloquear, é direto
                 prefs.isManualLockActive = true
                 Toast.makeText(this, "Bloqueio ativado! Todos os apps bloqueados exceto WhatsApp.", Toast.LENGTH_SHORT).show()
                 updateUI()
@@ -117,6 +127,15 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnRegisterNfc.setOnClickListener {
+            if (nfcAdapter == null) {
+                Toast.makeText(this, "Este aparelho não possui leitor NFC.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            if (!nfcAdapter!!.isEnabled) {
+                startActivity(Intent(Settings.ACTION_NFC_SETTINGS))
+                return@setOnClickListener
+            }
+
             if (prefs.registeredNfcTagId != null) {
                 AlertDialog.Builder(this)
                     .setTitle("Tag NFC")
@@ -146,7 +165,7 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
 
-        // Blocos de horário
+        // Bloco de horário
         val schedules = prefs.getSchedules()
         if (schedules.isNotEmpty()) {
             val sched = schedules[0]
@@ -155,9 +174,86 @@ class MainActivity : AppCompatActivity() {
                 val updated = schedules.toMutableList()
                 updated[0] = sched.copy(isEnabled = isChecked)
                 prefs.saveSchedules(updated)
-                Toast.makeText(this, if (isChecked) "Bloco de Horário ativado!" else "Bloco de Horário desativado.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, if (isChecked) "Bloco ativado!" else "Bloco desativado.", Toast.LENGTH_SHORT).show()
             }
         }
+
+        binding.btnEditSchedule.setOnClickListener {
+            showEditScheduleDialog()
+        }
+
+        binding.btnSelectApps.setOnClickListener {
+            showSelectAppsDialog()
+        }
+    }
+
+    private fun showEditScheduleDialog() {
+        val schedules = prefs.getSchedules()
+        if (schedules.isEmpty()) return
+        val sched = schedules[0]
+
+        // Selecionar início
+        TimePickerDialog(this, { _, startHour, startMinute ->
+            // Selecionar fim
+            TimePickerDialog(this, { _, endHour, endMinute ->
+                val updated = sched.copy(
+                    startHour = startHour,
+                    startMinute = startMinute,
+                    endHour = endHour,
+                    endMinute = endMinute
+                )
+                val list = schedules.toMutableList()
+                list[0] = updated
+                prefs.saveSchedules(list)
+                Toast.makeText(this, "Horário atualizado com sucesso!", Toast.LENGTH_SHORT).show()
+                updateUI()
+            }, sched.endHour, sched.endMinute, true).apply {
+                setTitle("Horário de Término do Foco")
+                show()
+            }
+        }, sched.startHour, sched.startMinute, true).apply {
+            setTitle("Horário de Início do Foco")
+            show()
+        }
+    }
+
+    private fun showSelectAppsDialog() {
+        val pm = packageManager
+        val packages = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+            .filter { app ->
+                (app.flags and ApplicationInfo.FLAG_SYSTEM) == 0 &&
+                        app.packageName != packageName &&
+                        app.packageName != "com.whatsapp" &&
+                        app.packageName != "com.whatsapp.w4b"
+            }
+            .sortedBy { pm.getApplicationLabel(it).toString() }
+
+        if (packages.isEmpty()) {
+            Toast.makeText(this, "Nenhum aplicativo de terceiros encontrado.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val appNames = packages.map { pm.getApplicationLabel(it).toString() }.toTypedArray()
+        val currentBlocked = prefs.getBlockedPackages().toMutableSet()
+        val checkedItems = packages.map { currentBlocked.contains(it.packageName) }.toBooleanArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("Escolher Apps para Bloquear")
+            .setMultiChoiceItems(appNames, checkedItems) { _, which, isChecked ->
+                val pkg = packages[which].packageName
+                if (isChecked) {
+                    currentBlocked.add(pkg)
+                } else {
+                    currentBlocked.remove(pkg)
+                }
+            }
+            .setPositiveButton("Salvar") { _, _ ->
+                prefs.saveBlockedPackages(currentBlocked)
+                val count = currentBlocked.size
+                Toast.makeText(this, "$count aplicativo(s) configurado(s) para bloqueio.", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
     }
 
     private fun promptPinToUnlock() {
@@ -234,6 +330,12 @@ class MainActivity : AppCompatActivity() {
             binding.tvNfcInfo.text = "Tag NFC Vinculada: $registered\n(Aproxime esta tag para alternar o bloqueio)"
         } else {
             binding.tvNfcInfo.text = "Nenhuma Tag NFC vinculada. Toque no botão abaixo e aproxime sua tag para cadastrar."
+        }
+
+        val schedules = prefs.getSchedules()
+        if (schedules.isNotEmpty()) {
+            val s = schedules[0]
+            binding.tvScheduleName.text = String.format("Horário: %02d:%02d às %02d:%02d", s.startHour, s.startMinute, s.endHour, s.endMinute)
         }
     }
 

@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.view.View
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
@@ -27,19 +28,43 @@ class LockActivity : AppCompatActivity() {
         binding = ActivityLockBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // Impede que o usuário feche a tela de bloqueio com o botão voltar
+        setupScreenFlags()
+
+        // Botão voltar redireciona para a Home do Android
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                val homeIntent = Intent(Intent.ACTION_MAIN).apply {
-                    addCategory(Intent.CATEGORY_HOME)
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                }
-                startActivity(homeIntent)
+                goToHome()
             }
         })
 
+        binding.btnGoHome.setOnClickListener {
+            goToHome()
+        }
+
         setupNfc()
         setupPinUnlock()
+    }
+
+    private fun setupScreenFlags() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            )
+        }
+    }
+
+    private fun goToHome() {
+        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        startActivity(homeIntent)
+        finish()
     }
 
     private fun setupNfc() {
@@ -87,7 +112,6 @@ class LockActivity : AppCompatActivity() {
         val prefs = (application as FocusLockApp).prefs
         val registeredTag = prefs.registeredNfcTagId
 
-        // Se uma tag específica estiver cadastrada, valida se é ela; senão, qualquer tag registrada libera
         if (registeredTag == null || registeredTag == tagId) {
             unlockSuccess("Desbloqueado com sucesso via Tag NFC!")
         } else {
