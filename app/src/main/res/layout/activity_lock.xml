@@ -42,6 +42,19 @@
             android:textSize="14sp" />
 
         <TextView
+            android:id="@+id/tvCustomQuote"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/bg_card"
+            android:gravity="center"
+            android:padding="12dp"
+            android:text="&quot;Mantenha o foco no que realmente importa hoje.&quot;"
+            android:textColor="@color/text_white"
+            android:textSize="13sp"
+            android:textStyle="italic" />
+
+        <TextView
             android:id="@+id/tvBlockedStats"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -50,6 +63,18 @@
             android:textColor="@color/accent_green"
             android:textSize="12sp"
             android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvDailyBudgetStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:gravity="center"
+            android:text="📊 Orçamento Diário: 0/5 aberturas hoje"
+            android:textColor="@color/accent_blue"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
 
         <!-- NFC Instruction Card -->
         <LinearLayout

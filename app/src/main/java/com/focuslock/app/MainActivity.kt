@@ -203,34 +203,42 @@ class MainActivity : AppCompatActivity() {
         tag?.let { handleNfcTag(it) }
     }
 
+    private var pendingNfcTagName: String = "Tag de Casa"
+
     private fun handleNfcTag(tag: Tag) {
         val tagId = bytesToHex(tag.id)
 
         if (isWaitingForNfcRegistration) {
-            prefs.registeredNfcTagId = tagId
             isWaitingForNfcRegistration = false
-            Toast.makeText(this, "Tag NFC vinculada com sucesso! UID: $tagId", Toast.LENGTH_LONG).show()
+            val currentTags = prefs.getNfcTags().filterNot { it.uid.equals(tagId, ignoreCase = true) }.toMutableList()
+            currentTags.add(NfcTagProfile(uid = tagId, name = pendingNfcTagName))
+            prefs.saveNfcTags(currentTags)
+            Toast.makeText(
+                this,
+                "Tag \"$pendingNfcTagName\" vinculada! UID: $tagId",
+                Toast.LENGTH_LONG
+            ).show()
             updateUI()
             return
         }
 
-        val registered = prefs.registeredNfcTagId
-        if (registered == null || registered == tagId) {
+        if (prefs.isNfcTagAllowed(tagId)) {
+            val tagName = prefs.findNfcTagName(tagId) ?: "Tag NFC"
             if (prefs.isBlockingCurrentlyActive()) {
                 val hadSchedule = prefs.isAnyScheduleActiveNow()
                 prefs.isManualLockActive = false
                 if (hadSchedule) {
                     prefs.snoozeSchedulesForMinutes(15)
                 }
-                Toast.makeText(this, "Modo Foco Desativado via NFC!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Modo Foco Desativado via $tagName!", Toast.LENGTH_SHORT).show()
             } else {
                 if (!ensureAccessibilityBeforeLock()) return
                 prefs.isManualLockActive = true
-                Toast.makeText(this, "Modo Foco Ativado via NFC!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Modo Foco Ativado via $tagName!", Toast.LENGTH_SHORT).show()
             }
             updateUI()
         } else {
-            Toast.makeText(this, "Tag NFC não reconhecida.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Tag NFC ($tagId) não reconhecida.", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -274,28 +282,12 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            if (prefs.registeredNfcTagId != null) {
-                if (prefs.isBlockingCurrentlyActive()) {
-                    Toast.makeText(this, "Desbloqueie o FocusLock antes de alterar ou remover a Tag NFC.", Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
+            if (prefs.isBlockingCurrentlyActive()) {
+                verifyPasswordThen("Insira a Senha Mestre para gerenciar suas Tags NFC durante o bloqueio:") {
+                    showManageNfcTagsDialog()
                 }
-                AlertDialog.Builder(this)
-                    .setTitle("Tag NFC")
-                    .setMessage("Tag atual: ${prefs.registeredNfcTagId}\nDeseja remover ou registrar outra?")
-                    .setPositiveButton("Registrar Nova") { _, _ ->
-                        isWaitingForNfcRegistration = true
-                        Toast.makeText(this, "Aproxime a nova Tag NFC agora...", Toast.LENGTH_LONG).show()
-                    }
-                    .setNegativeButton("Remover Vínculo") { _, _ ->
-                        prefs.registeredNfcTagId = null
-                        Toast.makeText(this, "Tag desvinculada.", Toast.LENGTH_SHORT).show()
-                        updateUI()
-                    }
-                    .setNeutralButton("Cancelar", null)
-                    .show()
             } else {
-                isWaitingForNfcRegistration = true
-                Toast.makeText(this, "Aproxime a Tag NFC do aparelho agora para cadastrar...", Toast.LENGTH_LONG).show()
+                showManageNfcTagsDialog()
             }
         }
 
@@ -382,6 +374,231 @@ class MainActivity : AppCompatActivity() {
                 ).show()
             }
         }
+
+        binding.switchCognitiveChallenge.setOnClickListener {
+            val target = binding.switchCognitiveChallenge.isChecked
+            if (!target && prefs.isBlockingCurrentlyActive()) {
+                binding.switchCognitiveChallenge.isChecked = true
+                verifyPasswordThen("Insira a Senha Mestre para desativar o Desafio Cognitivo:") {
+                    prefs.isCognitiveChallengeEnabled = false
+                    updateUI()
+                    Toast.makeText(this, "Desafio Cognitivo desativado.", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                prefs.isCognitiveChallengeEnabled = target
+                Toast.makeText(
+                    this,
+                    if (target) "Desafio Cognitivo ativado!" else "Desafio Cognitivo desativado.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
+        binding.switchBlockShortsReels.setOnClickListener {
+            val target = binding.switchBlockShortsReels.isChecked
+            if (target && !ensureAccessibilityBeforeLock()) {
+                binding.switchBlockShortsReels.isChecked = false
+                return@setOnClickListener
+            }
+            if (!target && prefs.isBlockingCurrentlyActive()) {
+                binding.switchBlockShortsReels.isChecked = true
+                verifyPasswordThen("Insira a Senha Mestre para desativar o bloqueio de Shorts & Reels:") {
+                    prefs.isBlockShortsReelsEnabled = false
+                    updateUI()
+                    Toast.makeText(this, "Bloqueio de Shorts & Reels desativado.", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                prefs.isBlockShortsReelsEnabled = target
+                Toast.makeText(
+                    this,
+                    if (target) "Bloqueio de Shorts & Reels ativado!" else "Bloqueio de Shorts & Reels desativado.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
+        binding.btnEditCustomQuote.setOnClickListener {
+            showEditCustomQuoteDialog()
+        }
+
+        binding.switchDailyBudget.setOnClickListener {
+            val target = binding.switchDailyBudget.isChecked
+            if (!target && prefs.isBlockingCurrentlyActive()) {
+                binding.switchDailyBudget.isChecked = true
+                verifyPasswordThen("Insira a Senha Mestre para desativar o Orçamento Diário:") {
+                    prefs.isDailyBudgetEnabled = false
+                    updateUI()
+                    Toast.makeText(this, "Orçamento Diário desativado.", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                prefs.isDailyBudgetEnabled = target
+                updateUI()
+                Toast.makeText(
+                    this,
+                    if (target) "Orçamento Diário ativado!" else "Orçamento Diário desativado.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
+        binding.btnConfigureDailyBudget.setOnClickListener {
+            if (prefs.isBlockingCurrentlyActive()) {
+                verifyPasswordThen("Insira a Senha Mestre para alterar o Orçamento Diário:") {
+                    showConfigureDailyBudgetDialog()
+                }
+            } else {
+                showConfigureDailyBudgetDialog()
+            }
+        }
+    }
+
+    private fun showManageNfcTagsDialog() {
+        val tags = prefs.getNfcTags()
+        if (tags.isEmpty()) {
+            promptNewNfcTagName()
+            return
+        }
+
+        val items = tags.map { "🏷️ ${it.name} (${it.uid}) — Toque para remover" }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("Gerenciar Tags NFC (${tags.size})")
+            .setItems(items) { _, which ->
+                val removed = tags[which]
+                val updated = tags.filterIndexed { idx, _ -> idx != which }
+                prefs.saveNfcTags(updated)
+                Toast.makeText(this, "Tag \"${removed.name}\" removida.", Toast.LENGTH_SHORT).show()
+                updateUI()
+            }
+            .setPositiveButton("+ Adicionar Nova Tag") { _, _ ->
+                promptNewNfcTagName()
+            }
+            .setNeutralButton("Limpar Todas") { _, _ ->
+                prefs.saveNfcTags(emptyList())
+                Toast.makeText(this, "Todas as tags foram desvinculadas.", Toast.LENGTH_SHORT).show()
+                updateUI()
+            }
+            .setNegativeButton("Fechar", null)
+            .show()
+    }
+
+    private fun promptNewNfcTagName() {
+        val input = EditText(this).apply {
+            hint = "Nome da Tag (ex: Casa, Trabalho, Quarto)"
+            setText("Tag de Casa")
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = dpToPx(20)
+            setPadding(pad, dpToPx(12), pad, dpToPx(4))
+            addView(input)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Cadastrar Nova Tag NFC")
+            .setMessage("Escolha um nome para identificar esta Tag NFC e depois aproxime-a do celular:")
+            .setView(container)
+            .setPositiveButton("Aproximar Tag Agora") { _, _ ->
+                pendingNfcTagName = input.text?.toString()?.trim().takeUnless { it.isNullOrBlank() } ?: "Tag NFC"
+                isWaitingForNfcRegistration = true
+                Toast.makeText(
+                    this,
+                    "Aproxime a tag \"$pendingNfcTagName\" na parte traseira do aparelho agora...",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun showEditCustomQuoteDialog() {
+        val input = EditText(this).apply {
+            hint = "Ex: Foco no projeto até às 18h — não abra o feed!"
+            setText(prefs.customLockQuote)
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = dpToPx(20)
+            setPadding(pad, dpToPx(12), pad, dpToPx(4))
+            addView(input)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Frase / Meta na Tela de Bloqueio")
+            .setMessage("Esta mensagem aparecerá em destaque toda vez que um aplicativo restrito for bloqueado:")
+            .setView(container)
+            .setPositiveButton("Salvar") { _, _ ->
+                val quote = input.text?.toString()?.trim().takeUnless { it.isNullOrBlank() }
+                    ?: BlockPreferences.DEFAULT_LOCK_QUOTE
+                prefs.customLockQuote = quote
+                updateUI()
+                Toast.makeText(this, "Frase personalizada atualizada!", Toast.LENGTH_SHORT).show()
+            }
+            .setNeutralButton("Restaurar Padrão") { _, _ ->
+                prefs.customLockQuote = BlockPreferences.DEFAULT_LOCK_QUOTE
+                updateUI()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun showConfigureDailyBudgetDialog() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = dpToPx(20)
+            setPadding(pad, dpToPx(12), pad, dpToPx(4))
+        }
+
+        val lblOpens = TextView(this).apply {
+            text = "Máximo de aberturas permitidas por dia:"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+            textSize = 13f
+        }
+        val inputOpens = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(prefs.dailyMaxOpens.toString())
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+        }
+
+        val lblMinutes = TextView(this).apply {
+            text = "Minutos liberados por cada abertura:"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+            textSize = 13f
+            setPadding(0, dpToPx(10), 0, 0)
+        }
+        val inputMinutes = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(prefs.dailySessionMinutes.toString())
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+        }
+
+        container.addView(lblOpens)
+        container.addView(inputOpens)
+        container.addView(lblMinutes)
+        container.addView(inputMinutes)
+
+        AlertDialog.Builder(this)
+            .setTitle("Orçamento Diário (ScreenZen)")
+            .setView(container)
+            .setPositiveButton("Salvar") { _, _ ->
+                val maxOpens = inputOpens.text?.toString()?.toIntOrNull()?.coerceIn(1, 100) ?: 5
+                val sessionMins = inputMinutes.text?.toString()?.toIntOrNull()?.coerceIn(1, 120) ?: 5
+                prefs.dailyMaxOpens = maxOpens
+                prefs.dailySessionMinutes = sessionMins
+                prefs.isDailyBudgetEnabled = true
+                updateUI()
+                Toast.makeText(
+                    this,
+                    "Orçamento configurado: $maxOpens aberturas/dia de $sessionMins min cada!",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
     }
 
     private fun showStrictnessModeDialog() {
@@ -1176,11 +1393,12 @@ class MainActivity : AppCompatActivity() {
                 ContextCompat.getColorStateList(this, R.color.accent_blue)
         }
 
-        val registered = prefs.registeredNfcTagId
-        if (registered != null) {
-            binding.tvNfcInfo.text = "Tag NFC Vinculada: $registered\n(Aproxime esta tag para alternar o bloqueio)"
+        val nfcTags = prefs.getNfcTags()
+        if (nfcTags.isNotEmpty()) {
+            val tagsSummary = nfcTags.joinToString("\n") { "• ${it.name}: ${it.uid}" }
+            binding.tvNfcInfo.text = "Tags NFC Vinculadas (${nfcTags.size}):\n$tagsSummary"
         } else {
-            binding.tvNfcInfo.text = "Nenhuma Tag NFC vinculada. Toque no botão abaixo e aproxime sua tag para cadastrar."
+            binding.tvNfcInfo.text = "Nenhuma Tag NFC vinculada. Toque no botão abaixo para cadastrar suas tags (Casa, Trabalho, etc.)."
         }
 
         binding.tvBlockedAppsSummary.text = if (blockedCount == 0) {
@@ -1198,6 +1416,16 @@ class MainActivity : AppCompatActivity() {
             else -> "Modo Atual: Normal (Senha Mestre ou NFC imediato)"
         }
         binding.switchAntiTamper.isChecked = prefs.isAntiTamperEnabled
+        binding.switchCognitiveChallenge.isChecked = prefs.isCognitiveChallengeEnabled
+        binding.switchBlockShortsReels.isChecked = prefs.isBlockShortsReelsEnabled
+        binding.tvCustomQuotePreview.text = "Frase de foco: \"${prefs.customLockQuote}\""
+
+        binding.switchDailyBudget.isChecked = prefs.isDailyBudgetEnabled
+        val usedOpens = prefs.getDailyOpensUsedToday()
+        val maxOpens = prefs.dailyMaxOpens
+        val sessionMins = prefs.dailySessionMinutes
+        binding.tvDailyBudgetSummary.text =
+            "Limite: $maxOpens aberturas/dia • $sessionMins min por sessão (Usado hoje: $usedOpens/$maxOpens)"
 
         renderSchedulesList()
     }

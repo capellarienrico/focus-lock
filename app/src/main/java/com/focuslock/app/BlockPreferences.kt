@@ -6,9 +6,29 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.view.inputmethod.InputMethodManager
 import org.json.JSONArray
+import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+data class NfcTagProfile(
+    val uid: String,
+    val name: String
+) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("uid", uid)
+        put("name", name)
+    }
+
+    companion object {
+        fun fromJson(json: JSONObject): NfcTagProfile {
+            return NfcTagProfile(
+                uid = json.optString("uid", ""),
+                name = json.optString("name", "Tag NFC")
+            )
+        }
+    }
+}
 
 class BlockPreferences(private val appContext: Context) {
 
@@ -32,6 +52,64 @@ class BlockPreferences(private val appContext: Context) {
         set(value) {
             prefs.edit().putBoolean(KEY_ANTI_TAMPER, value).commit()
         }
+
+    var isBlockShortsReelsEnabled: Boolean
+        get() = prefs.getBoolean(KEY_BLOCK_SHORTS_REELS, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_BLOCK_SHORTS_REELS, value).commit()
+        }
+
+    var isCognitiveChallengeEnabled: Boolean
+        get() = prefs.getBoolean(KEY_COGNITIVE_CHALLENGE, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_COGNITIVE_CHALLENGE, value).commit()
+        }
+
+    var customLockQuote: String
+        get() = prefs.getString(KEY_CUSTOM_LOCK_QUOTE, DEFAULT_LOCK_QUOTE) ?: DEFAULT_LOCK_QUOTE
+        set(value) {
+            prefs.edit().putString(KEY_CUSTOM_LOCK_QUOTE, value).commit()
+        }
+
+    var isDailyBudgetEnabled: Boolean
+        get() = prefs.getBoolean(KEY_DAILY_BUDGET_ENABLED, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_DAILY_BUDGET_ENABLED, value).commit()
+        }
+
+    var dailyMaxOpens: Int
+        get() = prefs.getInt(KEY_DAILY_MAX_OPENS, 5)
+        set(value) {
+            prefs.edit().putInt(KEY_DAILY_MAX_OPENS, value).commit()
+        }
+
+    var dailySessionMinutes: Int
+        get() = prefs.getInt(KEY_DAILY_SESSION_MINUTES, 5)
+        set(value) {
+            prefs.edit().putInt(KEY_DAILY_SESSION_MINUTES, value).commit()
+        }
+
+    fun getDailyOpensUsedToday(): Int {
+        val today = currentDateKey()
+        val savedDate = prefs.getString(KEY_DAILY_OPENS_DATE, "") ?: ""
+        if (savedDate != today) return 0
+        return prefs.getInt(KEY_DAILY_OPENS_USED, 0)
+    }
+
+    fun incrementDailyOpensUsed() {
+        val today = currentDateKey()
+        val savedDate = prefs.getString(KEY_DAILY_OPENS_DATE, "") ?: ""
+        val current = if (savedDate == today) prefs.getInt(KEY_DAILY_OPENS_USED, 0) else 0
+        prefs.edit()
+            .putString(KEY_DAILY_OPENS_DATE, today)
+            .putInt(KEY_DAILY_OPENS_USED, current + 1)
+            .commit()
+    }
+
+    fun isDailyBudgetExhausted(): Boolean {
+        if (!isDailyBudgetEnabled) return false
+        return getDailyOpensUsedToday() >= dailyMaxOpens
+    }
 
     fun getBlockedAttemptsToday(): Int {
         val today = currentDateKey()
@@ -85,10 +163,55 @@ class BlockPreferences(private val appContext: Context) {
     }
 
     var registeredNfcTagId: String?
-        get() = prefs.getString(KEY_NFC_TAG, null)
+        get() = getNfcTags().firstOrNull()?.uid
         set(value) {
-            prefs.edit().putString(KEY_NFC_TAG, value).commit()
+            if (value == null) {
+                saveNfcTags(emptyList())
+            } else {
+                saveNfcTags(listOf(NfcTagProfile(uid = value, name = "Tag Principal")))
+            }
         }
+
+    fun getNfcTags(): MutableList<NfcTagProfile> {
+        val jsonStr = prefs.getString(KEY_NFC_TAGS_JSON, null)
+        if (jsonStr != null) {
+            return try {
+                val arr = JSONArray(jsonStr)
+                val list = mutableListOf<NfcTagProfile>()
+                for (i in 0 until arr.length()) {
+                    val item = NfcTagProfile.fromJson(arr.getJSONObject(i))
+                    if (item.uid.isNotBlank()) list.add(item)
+                }
+                list
+            } catch (_: Exception) {
+                mutableListOf()
+            }
+        }
+        val legacy = prefs.getString(KEY_NFC_TAG, null)
+        return if (!legacy.isNullOrBlank()) {
+            mutableListOf(NfcTagProfile(uid = legacy, name = "Tag de Casa"))
+        } else {
+            mutableListOf()
+        }
+    }
+
+    fun saveNfcTags(tags: List<NfcTagProfile>) {
+        val arr = JSONArray()
+        tags.forEach { arr.put(it.toJson()) }
+        prefs.edit()
+            .putString(KEY_NFC_TAGS_JSON, arr.toString())
+            .remove(KEY_NFC_TAG)
+            .commit()
+    }
+
+    fun isNfcTagAllowed(uid: String): Boolean {
+        val tags = getNfcTags()
+        return tags.isEmpty() || tags.any { it.uid.equals(uid, ignoreCase = true) }
+    }
+
+    fun findNfcTagName(uid: String): String? {
+        return getNfcTags().firstOrNull { it.uid.equals(uid, ignoreCase = true) }?.name
+    }
 
     var masterPin: String
         get() = prefs.getString(KEY_MASTER_PIN, "1234") ?: "1234"
@@ -276,15 +399,25 @@ class BlockPreferences(private val appContext: Context) {
         const val MODE_NORMAL = "NORMAL"
         const val MODE_MINDFUL_DELAY = "MINDFUL_DELAY"
         const val MODE_DEEP_FOCUS_NFC = "DEEP_FOCUS_NFC"
+        const val DEFAULT_LOCK_QUOTE = "Mantenha o foco no que realmente importa hoje."
 
         private const val KEY_PASSWORD_CONFIGURED = "password_configured"
         private const val KEY_STRICTNESS_MODE = "strictness_mode"
         private const val KEY_ANTI_TAMPER = "anti_tamper_enabled"
+        private const val KEY_BLOCK_SHORTS_REELS = "block_shorts_reels"
+        private const val KEY_COGNITIVE_CHALLENGE = "cognitive_challenge"
+        private const val KEY_CUSTOM_LOCK_QUOTE = "custom_lock_quote"
+        private const val KEY_DAILY_BUDGET_ENABLED = "daily_budget_enabled"
+        private const val KEY_DAILY_MAX_OPENS = "daily_max_opens"
+        private const val KEY_DAILY_SESSION_MINUTES = "daily_session_minutes"
+        private const val KEY_DAILY_OPENS_DATE = "daily_opens_date"
+        private const val KEY_DAILY_OPENS_USED = "daily_opens_used"
         private const val KEY_STATS_DATE = "stats_date"
         private const val KEY_BLOCKED_ATTEMPTS_TODAY = "blocked_attempts_today"
         private const val KEY_MANUAL_LOCK = "manual_lock"
         private const val KEY_SCHEDULE_SNOOZE_UNTIL = "schedule_snooze_until"
         private const val KEY_NFC_TAG = "nfc_tag_id"
+        private const val KEY_NFC_TAGS_JSON = "nfc_tags_json"
         private const val KEY_MASTER_PIN = "master_pin"
         private const val KEY_SCHEDULES = "schedules_json"
         private const val KEY_BLOCKED_PACKAGES = "blocked_packages"

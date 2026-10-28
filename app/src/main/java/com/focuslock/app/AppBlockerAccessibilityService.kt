@@ -28,8 +28,8 @@ class AppBlockerAccessibilityService : AccessibilityService() {
                 val isScreenOn = powerManager?.isInteractive ?: true
                 if (isScreenOn) {
                     val prefs = (application as? FocusLockApp)?.prefs
-                    // Só inspeciona a janela ativa se o bloqueio manual ou algum horário estiver ativo
-                    if (prefs != null && prefs.isBlockingCurrentlyActive()) {
+                    // Só inspeciona a janela ativa se o bloqueio, horário ou filtro de Shorts/Reels estiver ativo
+                    if (prefs != null && (prefs.isBlockingCurrentlyActive() || prefs.isBlockShortsReelsEnabled)) {
                         checkCurrentWindowAndBlock()
                     }
                 }
@@ -104,8 +104,8 @@ class AppBlockerAccessibilityService : AccessibilityService() {
             currentForegroundPackage = packageName
         }
 
-        // Otimização de bateria: se não há bloqueio manual nem horário ativo agora, retorna imediatamente sem custo de CPU
-        if (!prefs.isBlockingCurrentlyActive() || LockActivity.isShowing) {
+        // Otimização de bateria: se não há bloqueio manual, horário ativo nem filtro Shorts/Reels ativo, retorna imediatamente
+        if ((!prefs.isBlockingCurrentlyActive() && !prefs.isBlockShortsReelsEnabled) || LockActivity.isShowing) {
             return
         }
 
@@ -114,8 +114,24 @@ class AppBlockerAccessibilityService : AccessibilityService() {
             return
         }
 
+        // Bloqueio seletivo de YouTube Shorts e Instagram Reels
+        if (prefs.isBlockShortsReelsEnabled && isShortsOrReelsScreenActive(packageName)) {
+            lastBlockedTime = now
+            if (now - lastStatRecordedTime > 3000L) {
+                lastStatRecordedTime = now
+                prefs.recordBlockedAttempt()
+            }
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            launchLockScreen("Shorts / Reels (Feed Curto)")
+            return
+        }
+
+        if (!prefs.isBlockingCurrentlyActive()) {
+            return
+        }
+
         // Proteção Anti-Burla (Strict Mode): bloqueia tentativa de forçar parada/desinstalar/desativar o FocusLock nas Configurações
-        if (prefs.isBlockingCurrentlyActive() && prefs.isAntiTamperEnabled && isSettingsTamperAttempt(packageName)) {
+        if (prefs.isAntiTamperEnabled && isSettingsTamperAttempt(packageName)) {
             lastBlockedTime = now
             if (now - lastStatRecordedTime > 3000L) {
                 lastStatRecordedTime = now
@@ -135,6 +151,42 @@ class AppBlockerAccessibilityService : AccessibilityService() {
             Log.d("AppBlocker", "Bloqueando pacote restrito: $packageName")
             launchLockScreen(packageName)
         }
+    }
+
+    private fun isShortsOrReelsScreenActive(packageName: String): Boolean {
+        if (packageName != "com.google.android.youtube" && packageName != "com.instagram.android") {
+            return false
+        }
+        val root = rootInActiveWindow ?: return false
+        val shortsReelsViewIds = listOf(
+            "reel_player_page_container",
+            "reel_recycler",
+            "reel_watch_fragment_root",
+            "shorts_player",
+            "clips_viewer_view_pager",
+            "clips_video_container",
+            "reel_viewer_root"
+        )
+        return hasMatchingViewId(root, shortsReelsViewIds, 0)
+    }
+
+    private fun hasMatchingViewId(
+        node: AccessibilityNodeInfo?,
+        markers: List<String>,
+        depth: Int
+    ): Boolean {
+        if (node == null || depth > 8) return false
+        val viewId = node.viewIdResourceName?.lowercase() ?: ""
+        if (viewId.isNotEmpty() && markers.any { viewId.contains(it) }) {
+            return true
+        }
+        val count = node.childCount
+        for (i in 0 until count) {
+            if (hasMatchingViewId(node.getChild(i), markers, depth + 1)) {
+                return true
+            }
+        }
+        return false
     }
 
     private fun launchLockScreen(blockedPkgOrReason: String) {

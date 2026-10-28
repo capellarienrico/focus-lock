@@ -11,13 +11,19 @@ import android.os.Bundle
 import android.os.CountDownTimer
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.text.InputType
 import android.view.View
 import android.view.WindowManager
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import com.focuslock.app.databinding.ActivityLockBinding
+import java.security.SecureRandom
 
 class LockActivity : AppCompatActivity() {
 
@@ -54,19 +60,52 @@ class LockActivity : AppCompatActivity() {
         val prefs = (application as FocusLockApp).prefs
         val attempts = prefs.getBlockedAttemptsToday()
         binding.tvBlockedStats.text = "🛡️ $attempts tentativa(s) de distração bloqueada(s) hoje"
+        binding.tvCustomQuote.text = "\"${prefs.customLockQuote}\""
+
+        if (prefs.isDailyBudgetEnabled) {
+            val used = prefs.getDailyOpensUsedToday()
+            val max = prefs.dailyMaxOpens
+            val mins = prefs.dailySessionMinutes
+            binding.tvDailyBudgetStatus.visibility = View.VISIBLE
+            if (used >= max) {
+                binding.tvDailyBudgetStatus.text =
+                    "⛔ Orçamento Diário Esgotado ($used/$max aberturas hoje)"
+                binding.tvDailyBudgetStatus.setTextColor(
+                    ContextCompat.getColor(this, R.color.accent_red)
+                )
+            } else {
+                binding.tvDailyBudgetStatus.text =
+                    "📊 Orçamento Diário: $used de $max aberturas usadas (${mins} min/sessão)"
+                binding.tvDailyBudgetStatus.setTextColor(
+                    ContextCompat.getColor(this, R.color.accent_blue)
+                )
+            }
+        } else {
+            binding.tvDailyBudgetStatus.visibility = View.GONE
+        }
 
         val pkg = intent?.getStringExtra("BLOCKED_PACKAGE")
         if (!pkg.isNullOrBlank()) {
-            if (pkg.startsWith("Proteção Anti-Burla")) {
-                binding.tvBlockedAppName.text = "Proteção Anti-Burla ativa: As configurações do FocusLock estão protegidas."
-                return
-            }
-            try {
-                val appInfo = packageManager.getApplicationInfo(pkg, 0)
-                val appLabel = packageManager.getApplicationLabel(appInfo).toString()
-                binding.tvBlockedAppName.text = "Mantenha o foco. O app \"$appLabel\" está restrito."
-            } catch (_: Exception) {
-                binding.tvBlockedAppName.text = "Mantenha o foco. Este aplicativo está restrito."
+            when {
+                pkg.startsWith("Proteção Anti-Burla") -> {
+                    binding.tvBlockedAppName.text =
+                        "Proteção Anti-Burla ativa: As configurações do FocusLock estão protegidas."
+                }
+                pkg.startsWith("Shorts / Reels") -> {
+                    binding.tvBlockedAppName.text =
+                        "Feed curto (Shorts / Reels) bloqueado! Vídeos normais e mensagens continuam liberados."
+                }
+                else -> {
+                    try {
+                        val appInfo = packageManager.getApplicationInfo(pkg, 0)
+                        val appLabel = packageManager.getApplicationLabel(appInfo).toString()
+                        binding.tvBlockedAppName.text =
+                            "Mantenha o foco. O app \"$appLabel\" está restrito."
+                    } catch (_: Exception) {
+                        binding.tvBlockedAppName.text =
+                            "Mantenha o foco. Este aplicativo está restrito."
+                    }
+                }
             }
         }
     }
@@ -200,13 +239,13 @@ class LockActivity : AppCompatActivity() {
     private fun handleNfcTag(tag: Tag) {
         val tagId = bytesToHex(tag.id)
         val prefs = (application as FocusLockApp).prefs
-        val registeredTag = prefs.registeredNfcTagId
 
-        if (registeredTag == null || registeredTag == tagId) {
-            unlockSuccess("Desbloqueado via Tag NFC!")
+        if (prefs.isNfcTagAllowed(tagId)) {
+            val tagName = prefs.findNfcTagName(tagId) ?: "Tag NFC"
+            unlockSuccess("Desbloqueado via $tagName!", viaNfc = true)
         } else {
             vibrateError()
-            binding.tvError.text = "Tag NFC não reconhecida para desbloqueio."
+            binding.tvError.text = "Tag NFC ($tagId) não reconhecida para desbloqueio."
             binding.tvError.visibility = View.VISIBLE
         }
     }
@@ -214,10 +253,17 @@ class LockActivity : AppCompatActivity() {
     private fun setupPinUnlock() {
         binding.btnUnlockWithPin.setOnClickListener {
             val enteredPin = binding.etPin.text?.toString()?.trim() ?: ""
-            val masterPin = (application as FocusLockApp).prefs.masterPin
+            val prefs = (application as FocusLockApp).prefs
+            val masterPin = prefs.masterPin
 
             if (enteredPin.isNotEmpty() && enteredPin == masterPin) {
-                unlockSuccess("Desbloqueado com Senha Mestre!")
+                if (prefs.isCognitiveChallengeEnabled || prefs.isDailyBudgetExhausted()) {
+                    promptCognitiveChallengeThen {
+                        unlockSuccess("Desbloqueado com Senha Mestre!", viaNfc = false)
+                    }
+                } else {
+                    unlockSuccess("Desbloqueado com Senha Mestre!", viaNfc = false)
+                }
             } else {
                 vibrateError()
                 binding.tvError.text = "Senha Mestre incorreta. Tente novamente."
@@ -227,15 +273,85 @@ class LockActivity : AppCompatActivity() {
         }
     }
 
-    private fun unlockSuccess(message: String) {
+    private fun promptCognitiveChallengeThen(onPassed: () -> Unit) {
+        val random = SecureRandom()
+        val a = random.nextInt(12) + 7 // 7..18
+        val b = random.nextInt(8) + 4  // 4..11
+        val c = random.nextInt(35) + 12 // 12..46
+        val expectedAnswer = (a * b) + c
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(56, 24, 56, 8)
+        }
+
+        val info = TextView(this).apply {
+            text = "🧠 Desafio Cognitivo (Anti-Impulso)\nResolva o cálculo abaixo para confirmar que o desbloqueio é consciente:\n\n($a × $b) + $c = ?"
+            setTextColor(ContextCompat.getColor(this@LockActivity, R.color.text_white))
+            textSize = 15f
+        }
+
+        val answerInput = EditText(this).apply {
+            hint = "Resultado numérico"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setTextColor(ContextCompat.getColor(this@LockActivity, R.color.text_white))
+            setHintTextColor(ContextCompat.getColor(this@LockActivity, R.color.text_secondary))
+        }
+
+        container.addView(info)
+        container.addView(answerInput)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Desafio Cognitivo")
+            .setView(container)
+            .setPositiveButton("Confirmar", null)
+            .setNegativeButton("Cancelar", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val ans = answerInput.text?.toString()?.trim()?.toIntOrNull()
+                if (ans == expectedAnswer) {
+                    dialog.dismiss()
+                    onPassed()
+                } else {
+                    vibrateError()
+                    answerInput.error = "Resposta incorreta! Calcule ($a × $b) + $c"
+                }
+            }
+        }
+
+        dialog.show()
+    }
+
+    private fun unlockSuccess(message: String, viaNfc: Boolean) {
         mindfulTimer?.cancel()
         val prefs = (application as FocusLockApp).prefs
         val hadActiveSchedule = prefs.getSchedules().any { it.isActiveNow() }
         prefs.isManualLockActive = false
 
+        if (prefs.isDailyBudgetEnabled && !viaNfc) {
+            prefs.incrementDailyOpensUsed()
+        }
+
         vibrateSuccess()
 
         if (hadActiveSchedule) {
+            if (prefs.isDailyBudgetEnabled && !viaNfc) {
+                val mins = prefs.dailySessionMinutes
+                prefs.snoozeSchedulesForMinutes(mins)
+                isShowing = false
+                val used = prefs.getDailyOpensUsedToday()
+                val max = prefs.dailyMaxOpens
+                Toast.makeText(
+                    this,
+                    "$message (Liberado por $mins min • Abertura $used/$max hoje)",
+                    Toast.LENGTH_LONG
+                ).show()
+                finish()
+                return
+            }
+
             val options = arrayOf(
                 "1 minuto (Olhada rápida - ScreenZen)",
                 "5 minutos",
