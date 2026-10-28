@@ -14,7 +14,9 @@ class BlockPreferences(private val appContext: Context) {
 
     var isMasterPasswordConfigured: Boolean
         get() = prefs.getBoolean(KEY_PASSWORD_CONFIGURED, false)
-        set(value) = prefs.edit().putBoolean(KEY_PASSWORD_CONFIGURED, value).commit()
+        set(value) {
+            prefs.edit().putBoolean(KEY_PASSWORD_CONFIGURED, value).commit()
+        }
 
     var isManualLockActive: Boolean
         get() = prefs.getBoolean(KEY_MANUAL_LOCK, false)
