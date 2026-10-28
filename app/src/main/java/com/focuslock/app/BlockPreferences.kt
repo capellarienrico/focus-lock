@@ -363,8 +363,20 @@ class BlockPreferences(private val appContext: Context) {
         // WhatsApp (padrão e business)
         if (packageName == "com.whatsapp" || packageName == "com.whatsapp.w4b") return true
 
+        // Aplicativos de Banco e Pagamentos (sempre liberados e nunca monitorados)
+        if (BANKING_PACKAGES.contains(packageName) ||
+            lower.contains("nubank") ||
+            lower.startsWith("com.itau") ||
+            lower.startsWith("com.bradesco") ||
+            lower.startsWith("br.com.bb.") ||
+            lower.startsWith("br.com.intermedium") ||
+            lower.startsWith("com.c6bank") ||
+            lower.startsWith("com.santander") ||
+            lower.startsWith("br.gov.caixa")
+        ) return true
+
         // O próprio aplicativo FocusLock
-        if (packageName == appContext.packageName || packageName == "com.focuslock.app") return true
+        if (packageName == appContext.packageName || lower.startsWith("com.focuslock")) return true
 
         // Discadores e telefone de emergência
         if (lower.contains("dialer") || lower.contains("telecom") ||
@@ -400,6 +412,26 @@ class BlockPreferences(private val appContext: Context) {
         const val MODE_MINDFUL_DELAY = "MINDFUL_DELAY"
         const val MODE_DEEP_FOCUS_NFC = "DEEP_FOCUS_NFC"
         const val DEFAULT_LOCK_QUOTE = "Mantenha o foco no que realmente importa hoje."
+
+        private val BANKING_PACKAGES = setOf(
+            "com.nu.production",
+            "com.itau",
+            "com.itau.pers",
+            "com.bradesco",
+            "br.com.bb.android",
+            "br.com.intermedium",
+            "com.c6bank.app",
+            "com.santander.app",
+            "br.gov.caixa.tem",
+            "br.com.gabba.Caixa",
+            "com.mercadopago.wallet",
+            "com.picpay",
+            "br.com.xp.carteira",
+            "com.btgpactual.pactualdigital",
+            "br.com.neon",
+            "br.com.next",
+            "br.com.original.bank"
+        )
 
         private const val KEY_PASSWORD_CONFIGURED = "password_configured"
         private const val KEY_STRICTNESS_MODE = "strictness_mode"

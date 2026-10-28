@@ -11,6 +11,7 @@ class FocusLockApp : Application() {
         super.onCreate()
         instance = this
         prefs = BlockPreferences(this)
+        AppBlockerService.ensureRunning(this)
     }
 
     companion object {

@@ -1,6 +1,5 @@
 package com.focuslock.app
 
-import android.accessibilityservice.AccessibilityService
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -176,16 +175,13 @@ class LockActivity : AppCompatActivity() {
     private fun goToHome() {
         isShowing = false
         mindfulTimer?.cancel()
-        val switchedByService = AppBlockerAccessibilityService.instance
-            ?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME) == true
+        AppBlockerService.onNavigatedHome()
 
-        if (!switchedByService) {
-            val homeIntent = Intent(Intent.ACTION_MAIN).apply {
-                addCategory(Intent.CATEGORY_HOME)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            }
-            startActivity(homeIntent)
+        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
+        startActivity(homeIntent)
         finish()
     }
 

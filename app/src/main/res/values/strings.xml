@@ -1,10 +1,9 @@
 <resources>
     <string name="app_name">FocusLock</string>
-    <string name="accessibility_service_desc">O FocusLock precisa deste serviço para detectar quando um aplicativo bloqueado é aberto e exibir a tela de foco.</string>
     <string name="btn_lock_now">ATIVAR BLOQUEIO AGORA</string>
     <string name="btn_unlock_now">DESBLOQUEAR</string>
     <string name="nfc_status_registered">Tag NFC Vinculada: %s</string>
     <string name="nfc_status_none">Nenhuma Tag NFC vinculada. Aproxime uma tag para cadastrar.</string>
     <string name="master_pin_title">Senha Mestre (PIN)</string>
-    <string name="whatsapp_whitelist_notice">✅ WhatsApp e Discador de Emergência permanecem sempre liberados.</string>
+    <string name="whatsapp_whitelist_notice">✅ WhatsApp, Aplicativos de Banco (Nubank, Itaú, etc.) e Discador de Emergência permanecem sempre liberados.</string>
 </resources>

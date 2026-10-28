@@ -8,20 +8,46 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.focuslock.app"
+        applicationId = "com.focuslock.zen"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
+    }
+
+    signingConfigs {
+        create("releaseKey") {
+            val ksFile = file("release.p12")
+            if (ksFile.exists()) {
+                storeFile = ksFile
+                storeType = "PKCS12"
+                storePassword = "focuslock_release_2026"
+                keyAlias = "focuslock_key"
+                keyPassword = "focuslock_release_2026"
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            isDebuggable = false
+            val ksFile = file("release.p12")
+            signingConfig = if (ksFile.exists()) {
+                signingConfigs.getByName("releaseKey")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+        debug {
+            val ksFile = file("release.p12")
+            if (ksFile.exists()) {
+                signingConfig = signingConfigs.getByName("releaseKey")
+            }
         }
     }
     compileOptions {

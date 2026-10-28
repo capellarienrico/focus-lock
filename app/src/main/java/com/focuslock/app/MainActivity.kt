@@ -31,6 +31,7 @@ import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
 import com.focuslock.app.databinding.ActivityMainBinding
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.tabs.TabLayout
 import java.security.SecureRandom
 import java.util.Calendar
 import java.util.UUID
@@ -50,6 +51,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         prefs = (application as FocusLockApp).prefs
+        setupTabs()
         setupNfc()
         setupListeners()
     }
@@ -242,21 +244,73 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun setupTabs() {
+        binding.tabLayoutMain.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: TabLayout.Tab?) {
+                val pos = tab?.position ?: 0
+                binding.llTabFocus.visibility = if (pos == 0) View.VISIBLE else View.GONE
+                binding.llTabSchedules.visibility = if (pos == 1) View.VISIBLE else View.GONE
+                binding.llTabStrictness.visibility = if (pos == 2) View.VISIBLE else View.GONE
+                binding.llTabSettings.visibility = if (pos == 3) View.VISIBLE else View.GONE
+                binding.scrollViewMain.scrollTo(0, 0)
+            }
+
+            override fun onTabUnselected(tab: TabLayout.Tab?) {}
+
+            override fun onTabReselected(tab: TabLayout.Tab?) {
+                binding.scrollViewMain.smoothScrollTo(0, 0)
+            }
+        })
+    }
+
     private fun ensureAccessibilityBeforeLock(): Boolean {
-        if (!AppBlockerAccessibilityService.isServiceEnabled(this)) {
+        if (!AppBlockerService.isServiceEnabled(this)) {
             AlertDialog.Builder(this)
-                .setTitle("Serviço de Acessibilidade Desativado")
+                .setTitle("Permissão de Acesso ao Uso Necessária")
                 .setMessage(
-                    "Para que o FocusLock consiga bloquear os aplicativos, você precisa ativar o serviço \"FocusLock\" em Configurações -> Acessibilidade.\n\n" +
-                            "Dica (Android 13+): Se a opção estiver cinza (\"Configuração restrita\"), toque primeiro em \"Liberar Configurações Restritas\" no card vermelho da tela inicial."
+                    "Para que o FocusLock identifique qual app está aberto (sem usar Acessibilidade e sem conflitar com o Nubank/bancos), ative o \"FocusLock\" em Acesso ao Uso."
                 )
-                .setPositiveButton("Abrir Acessibilidade") { _, _ ->
-                    startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                .setPositiveButton("Abrir Acesso ao Uso") { _, _ ->
+                    try {
+                        startActivity(
+                            Intent(
+                                Settings.ACTION_USAGE_ACCESS_SETTINGS,
+                                Uri.parse("package:$packageName")
+                            )
+                        )
+                    } catch (_: Exception) {
+                        startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                    }
                 }
                 .setNegativeButton("Cancelar", null)
                 .show()
             return false
         }
+
+        if (!Settings.canDrawOverlays(this)) {
+            AlertDialog.Builder(this)
+                .setTitle("Permissão de Sobreposição Necessária")
+                .setMessage(
+                    "Ative a permissão \"Sobrepor a outros apps\" para que a tela de bloqueio possa aparecer imediatamente quando um app restrito for aberto."
+                )
+                .setPositiveButton("Permitir Sobreposição") { _, _ ->
+                    try {
+                        startActivity(
+                            Intent(
+                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                Uri.parse("package:$packageName")
+                            )
+                        )
+                    } catch (_: Exception) {
+                        startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
+                    }
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
+            return false
+        }
+
+        AppBlockerService.ensureRunning(this)
         return true
     }
 
@@ -267,6 +321,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 if (!ensureAccessibilityBeforeLock()) return@setOnClickListener
                 prefs.isManualLockActive = true
+                AppBlockerService.ensureRunning(this)
                 Toast.makeText(this, "Bloqueio ativado com sucesso!", Toast.LENGTH_SHORT).show()
                 updateUI()
             }
@@ -300,7 +355,15 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnEnableAccessibility.setOnClickListener {
-            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            try {
+                val intent = Intent(
+                    Settings.ACTION_USAGE_ACCESS_SETTINGS,
+                    Uri.parse("package:$packageName")
+                )
+                startActivity(intent)
+            } catch (_: Exception) {
+                startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+            }
         }
 
         binding.btnEnableOverlay.setOnClickListener {
@@ -312,23 +375,6 @@ class MainActivity : AppCompatActivity() {
                 startActivity(intent)
             } catch (_: Exception) {
                 startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
-            }
-        }
-
-        binding.btnOpenAppDetails.setOnClickListener {
-            try {
-                val intent = Intent(
-                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                    Uri.parse("package:$packageName")
-                )
-                startActivity(intent)
-                Toast.makeText(
-                    this,
-                    "Toque nos 3 pontos (canto superior direito) e selecione \"Permitir configurações restritas\".",
-                    Toast.LENGTH_LONG
-                ).show()
-            } catch (_: Exception) {
-                startActivity(Intent(Settings.ACTION_SETTINGS))
             }
         }
 
@@ -389,29 +435,6 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(
                     this,
                     if (target) "Desafio Cognitivo ativado!" else "Desafio Cognitivo desativado.",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        }
-
-        binding.switchBlockShortsReels.setOnClickListener {
-            val target = binding.switchBlockShortsReels.isChecked
-            if (target && !ensureAccessibilityBeforeLock()) {
-                binding.switchBlockShortsReels.isChecked = false
-                return@setOnClickListener
-            }
-            if (!target && prefs.isBlockingCurrentlyActive()) {
-                binding.switchBlockShortsReels.isChecked = true
-                verifyPasswordThen("Insira a Senha Mestre para desativar o bloqueio de Shorts & Reels:") {
-                    prefs.isBlockShortsReelsEnabled = false
-                    updateUI()
-                    Toast.makeText(this, "Bloqueio de Shorts & Reels desativado.", Toast.LENGTH_SHORT).show()
-                }
-            } else {
-                prefs.isBlockShortsReelsEnabled = target
-                Toast.makeText(
-                    this,
-                    if (target) "Bloqueio de Shorts & Reels ativado!" else "Bloqueio de Shorts & Reels desativado.",
                     Toast.LENGTH_SHORT
                 ).show()
             }
@@ -1402,7 +1425,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.tvBlockedAppsSummary.text = if (blockedCount == 0) {
-            "Apps bloqueados (Global): Todos os apps (exceto WhatsApp)"
+            "Apps bloqueados (Global): Todos os apps (exceto WhatsApp e Bancos)"
         } else {
             "Apps bloqueados (Global): $blockedCount aplicativo(s) específico(s)"
         }
@@ -1417,7 +1440,6 @@ class MainActivity : AppCompatActivity() {
         }
         binding.switchAntiTamper.isChecked = prefs.isAntiTamperEnabled
         binding.switchCognitiveChallenge.isChecked = prefs.isCognitiveChallengeEnabled
-        binding.switchBlockShortsReels.isChecked = prefs.isBlockShortsReelsEnabled
         binding.tvCustomQuotePreview.text = "Frase de foco: \"${prefs.customLockQuote}\""
 
         binding.switchDailyBudget.isChecked = prefs.isDailyBudgetEnabled
@@ -1431,15 +1453,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkPermissionsStatus() {
-        val isAccessibilityEnabled = AppBlockerAccessibilityService.isServiceEnabled(this)
+        val isUsageStatsEnabled = AppBlockerService.isServiceEnabled(this)
         val isOverlayEnabled = Settings.canDrawOverlays(this)
 
-        if (isAccessibilityEnabled && isOverlayEnabled) {
+        if (isUsageStatsEnabled) {
+            AppBlockerService.ensureRunning(this)
+        }
+
+        if (isUsageStatsEnabled && isOverlayEnabled) {
             binding.cardAccessibilityWarning.visibility = View.GONE
         } else {
             binding.cardAccessibilityWarning.visibility = View.VISIBLE
-            binding.btnEnableAccessibility.visibility = if (isAccessibilityEnabled) View.GONE else View.VISIBLE
-            binding.btnOpenAppDetails.visibility = if (isAccessibilityEnabled) View.GONE else View.VISIBLE
+            binding.btnEnableAccessibility.visibility = if (isUsageStatsEnabled) View.GONE else View.VISIBLE
             binding.btnEnableOverlay.visibility = if (isOverlayEnabled) View.GONE else View.VISIBLE
         }
     }
