@@ -12,7 +12,8 @@ data class BlockSchedule(
     val endHour: Int,
     val endMinute: Int,
     val daysOfWeek: List<Int>, // Calendar.SUNDAY (1) .. SATURDAY (7)
-    val isEnabled: Boolean = true
+    val isEnabled: Boolean = true,
+    val customBlockedPackages: Set<String> = emptySet()
 ) {
     fun isActiveNow(): Boolean {
         if (!isEnabled) return false
@@ -70,6 +71,7 @@ data class BlockSchedule(
             put("endMinute", endMinute)
             put("daysOfWeek", JSONArray(daysOfWeek))
             put("isEnabled", isEnabled)
+            put("customBlockedPackages", JSONArray(customBlockedPackages.toList()))
         }
     }
 
@@ -80,6 +82,12 @@ data class BlockSchedule(
             for (i in 0 until daysJson.length()) {
                 days.add(daysJson.getInt(i))
             }
+            val pkgsJson = json.optJSONArray("customBlockedPackages") ?: JSONArray()
+            val customPkgs = mutableSetOf<String>()
+            for (i in 0 until pkgsJson.length()) {
+                val p = pkgsJson.optString(i)
+                if (p.isNotBlank()) customPkgs.add(p)
+            }
             return BlockSchedule(
                 id = json.getString("id"),
                 name = json.optString("name", "Bloco de Foco"),
@@ -88,7 +96,8 @@ data class BlockSchedule(
                 endHour = json.getInt("endHour"),
                 endMinute = json.getInt("endMinute"),
                 daysOfWeek = if (days.isEmpty()) listOf(1, 2, 3, 4, 5, 6, 7) else days,
-                isEnabled = json.optBoolean("isEnabled", true)
+                isEnabled = json.optBoolean("isEnabled", true),
+                customBlockedPackages = customPkgs
             )
         }
     }

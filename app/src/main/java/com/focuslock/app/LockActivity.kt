@@ -8,12 +8,14 @@ import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.os.Build
 import android.os.Bundle
+import android.os.CountDownTimer
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.focuslock.app.databinding.ActivityLockBinding
 
@@ -22,6 +24,7 @@ class LockActivity : AppCompatActivity() {
     private lateinit var binding: ActivityLockBinding
     private var nfcAdapter: NfcAdapter? = null
     private var pendingIntent: PendingIntent? = null
+    private var mindfulTimer: CountDownTimer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,11 +47,20 @@ class LockActivity : AppCompatActivity() {
 
         setupNfc()
         setupPinUnlock()
+        applyStrictnessModeUI()
     }
 
     private fun updateBlockedAppLabel(intent: Intent?) {
+        val prefs = (application as FocusLockApp).prefs
+        val attempts = prefs.getBlockedAttemptsToday()
+        binding.tvBlockedStats.text = "🛡️ $attempts tentativa(s) de distração bloqueada(s) hoje"
+
         val pkg = intent?.getStringExtra("BLOCKED_PACKAGE")
         if (!pkg.isNullOrBlank()) {
+            if (pkg.startsWith("Proteção Anti-Burla")) {
+                binding.tvBlockedAppName.text = "Proteção Anti-Burla ativa: As configurações do FocusLock estão protegidas."
+                return
+            }
             try {
                 val appInfo = packageManager.getApplicationInfo(pkg, 0)
                 val appLabel = packageManager.getApplicationLabel(appInfo).toString()
@@ -57,6 +69,56 @@ class LockActivity : AppCompatActivity() {
                 binding.tvBlockedAppName.text = "Mantenha o foco. Este aplicativo está restrito."
             }
         }
+    }
+
+    private fun applyStrictnessModeUI() {
+        mindfulTimer?.cancel()
+        val prefs = (application as FocusLockApp).prefs
+        val mode = prefs.strictnessMode
+
+        when (mode) {
+            BlockPreferences.MODE_DEEP_FOCUS_NFC -> {
+                binding.llMindfulSection.visibility = View.VISIBLE
+                binding.llPinSection.visibility = View.GONE
+                binding.tvMindfulPrompt.text =
+                    "🔒 Modo Deep Focus (Opal / Brick)\nDesbloqueio prioritário via Tag NFC física."
+                binding.tvMindfulCountdown.visibility = View.GONE
+                binding.btnEmergencyPinUnlock.visibility = View.VISIBLE
+                binding.btnEmergencyPinUnlock.setOnClickListener {
+                    binding.btnEmergencyPinUnlock.visibility = View.GONE
+                    binding.tvMindfulCountdown.visibility = View.VISIBLE
+                    startCountdownToRevealPin(30)
+                }
+            }
+            BlockPreferences.MODE_MINDFUL_DELAY -> {
+                binding.llMindfulSection.visibility = View.VISIBLE
+                binding.llPinSection.visibility = View.GONE
+                binding.tvMindfulPrompt.text =
+                    "🧘 Pausa Consciente (ScreenZen)\nRespire fundo. Você realmente precisa abrir este app agora?"
+                binding.tvMindfulCountdown.visibility = View.VISIBLE
+                binding.btnEmergencyPinUnlock.visibility = View.GONE
+                startCountdownToRevealPin(15)
+            }
+            else -> {
+                binding.llMindfulSection.visibility = View.GONE
+                binding.llPinSection.visibility = View.VISIBLE
+            }
+        }
+    }
+
+    private fun startCountdownToRevealPin(seconds: Int) {
+        mindfulTimer?.cancel()
+        mindfulTimer = object : CountDownTimer(seconds * 1000L, 1000L) {
+            override fun onTick(millisUntilFinished: Long) {
+                val secLeft = (millisUntilFinished / 1000L) + 1
+                binding.tvMindfulCountdown.text = "Liberando campo de Senha Mestre em ${secLeft}s..."
+            }
+
+            override fun onFinish() {
+                binding.llMindfulSection.visibility = View.GONE
+                binding.llPinSection.visibility = View.VISIBLE
+            }
+        }.start()
     }
 
     private fun setupScreenFlags() {
@@ -74,6 +136,7 @@ class LockActivity : AppCompatActivity() {
 
     private fun goToHome() {
         isShowing = false
+        mindfulTimer?.cancel()
         val switchedByService = AppBlockerAccessibilityService.instance
             ?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME) == true
 
@@ -112,6 +175,7 @@ class LockActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         isShowing = false
+        mindfulTimer?.cancel()
         super.onDestroy()
     }
 
@@ -120,6 +184,7 @@ class LockActivity : AppCompatActivity() {
         setIntent(intent)
         updateBlockedAppLabel(intent)
         binding.tvError.visibility = View.GONE
+        applyStrictnessModeUI()
 
         val tag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java)
@@ -138,7 +203,7 @@ class LockActivity : AppCompatActivity() {
         val registeredTag = prefs.registeredNfcTagId
 
         if (registeredTag == null || registeredTag == tagId) {
-            unlockSuccess("Desbloqueado com sucesso via Tag NFC!")
+            unlockSuccess("Desbloqueado via Tag NFC!")
         } else {
             vibrateError()
             binding.tvError.text = "Tag NFC não reconhecida para desbloqueio."
@@ -163,22 +228,42 @@ class LockActivity : AppCompatActivity() {
     }
 
     private fun unlockSuccess(message: String) {
+        mindfulTimer?.cancel()
         val prefs = (application as FocusLockApp).prefs
         val hadActiveSchedule = prefs.getSchedules().any { it.isActiveNow() }
         prefs.isManualLockActive = false
-        if (hadActiveSchedule) {
-            prefs.snoozeSchedulesForMinutes(15)
-        }
 
-        isShowing = false
         vibrateSuccess()
-        val finalMsg = if (hadActiveSchedule) {
-            "$message (Horário pausado por 15 min)"
+
+        if (hadActiveSchedule) {
+            val options = arrayOf(
+                "1 minuto (Olhada rápida - ScreenZen)",
+                "5 minutos",
+                "15 minutos",
+                "30 minutos"
+            )
+            val minutesValues = intArrayOf(1, 5, 15, 30)
+
+            AlertDialog.Builder(this)
+                .setTitle("Por quanto tempo deseja liberar?")
+                .setCancelable(false)
+                .setItems(options) { _, which ->
+                    val mins = minutesValues[which]
+                    prefs.snoozeSchedulesForMinutes(mins)
+                    isShowing = false
+                    Toast.makeText(
+                        this,
+                        "$message (Liberado por $mins min)",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    finish()
+                }
+                .show()
         } else {
-            message
+            isShowing = false
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+            finish()
         }
-        Toast.makeText(this, finalMsg, Toast.LENGTH_LONG).show()
-        finish()
     }
 
     private fun vibrateSuccess() {

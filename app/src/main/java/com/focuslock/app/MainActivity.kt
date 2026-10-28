@@ -353,6 +353,60 @@ class MainActivity : AppCompatActivity() {
                 showSelectAppsDialog()
             }
         }
+
+        binding.btnChangeStrictnessMode.setOnClickListener {
+            if (prefs.isBlockingCurrentlyActive()) {
+                verifyPasswordThen("Insira a Senha Mestre para alterar o Nível de Rigor durante o bloqueio:") {
+                    showStrictnessModeDialog()
+                }
+            } else {
+                showStrictnessModeDialog()
+            }
+        }
+
+        binding.switchAntiTamper.setOnClickListener {
+            val target = binding.switchAntiTamper.isChecked
+            if (!target && prefs.isBlockingCurrentlyActive()) {
+                binding.switchAntiTamper.isChecked = true
+                verifyPasswordThen("Insira a Senha Mestre para desativar a Proteção Anti-Burla:") {
+                    prefs.isAntiTamperEnabled = false
+                    updateUI()
+                    Toast.makeText(this, "Proteção Anti-Burla desativada.", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                prefs.isAntiTamperEnabled = target
+                Toast.makeText(
+                    this,
+                    if (target) "Proteção Anti-Burla ativada!" else "Proteção Anti-Burla desativada.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    private fun showStrictnessModeDialog() {
+        val modes = arrayOf(
+            "Normal (Senha Mestre ou NFC imediato)",
+            "Pausa Consciente — ScreenZen (Espera de 15s antes da senha)",
+            "Deep Focus — Opal / Brick (Exclusivo Tag NFC + Emergência 30s)"
+        )
+        val modeValues = arrayOf(
+            BlockPreferences.MODE_NORMAL,
+            BlockPreferences.MODE_MINDFUL_DELAY,
+            BlockPreferences.MODE_DEEP_FOCUS_NFC
+        )
+        val currentIdx = modeValues.indexOf(prefs.strictnessMode).coerceAtLeast(0)
+
+        AlertDialog.Builder(this)
+            .setTitle("Escolher Nível de Rigor")
+            .setSingleChoiceItems(modes, currentIdx) { dialog, which ->
+                prefs.strictnessMode = modeValues[which]
+                updateUI()
+                Toast.makeText(this, "Modo atualizado: ${modes[which]}", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
     }
 
     private fun verifyPasswordThen(message: String, onVerified: () -> Unit) {
@@ -451,7 +505,12 @@ class MainActivity : AppCompatActivity() {
 
             val subtitleTv = TextView(this).apply {
                 val statusBadge = if (isCurrentlyActive) " • ATIVO AGORA" else ""
-                text = "Dias: ${schedule.formatDaysOfWeek()}$statusBadge"
+                val appsBadge = if (schedule.customBlockedPackages.isEmpty()) {
+                    "Apps: Lista Global"
+                } else {
+                    "Apps: ${schedule.customBlockedPackages.size} específico(s)"
+                }
+                text = "Dias: ${schedule.formatDaysOfWeek()} • $appsBadge$statusBadge"
                 setTextColor(
                     ContextCompat.getColor(
                         this@MainActivity,
@@ -581,6 +640,7 @@ class MainActivity : AppCompatActivity() {
         var selectedEndHour = existing?.endHour ?: 18
         var selectedEndMinute = existing?.endMinute ?: 0
         val selectedDays = (existing?.daysOfWeek ?: listOf(1, 2, 3, 4, 5, 6, 7)).toMutableSet()
+        val selectedCustomApps = (existing?.customBlockedPackages ?: emptySet()).toMutableSet()
 
         val scrollView = ScrollView(this)
         val container = LinearLayout(this).apply {
@@ -639,6 +699,35 @@ class MainActivity : AppCompatActivity() {
         timeRow.addView(btnEndTime)
         container.addView(timeRow)
 
+        val btnScheduleApps = MaterialButton(
+            this,
+            null,
+            com.google.android.material.R.attr.materialButtonOutlinedStyle
+        ).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dpToPx(10)
+            }
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accent_blue))
+            text = if (selectedCustomApps.isEmpty()) {
+                "Apps deste Horário: Lista Global"
+            } else {
+                "Apps deste Horário: ${selectedCustomApps.size} selecionado(s)"
+            }
+            setOnClickListener {
+                showScheduleCustomAppsPicker(selectedCustomApps) {
+                    text = if (selectedCustomApps.isEmpty()) {
+                        "Apps deste Horário: Lista Global"
+                    } else {
+                        "Apps deste Horário: ${selectedCustomApps.size} selecionado(s)"
+                    }
+                }
+            }
+        }
+        container.addView(btnScheduleApps)
+
         val daysLabel = TextView(this).apply {
             text = "Dias da semana ativos:"
             setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
@@ -692,7 +781,8 @@ class MainActivity : AppCompatActivity() {
                     endHour = selectedEndHour,
                     endMinute = selectedEndMinute,
                     daysOfWeek = selectedDays.sorted(),
-                    isEnabled = existing?.isEnabled ?: true
+                    isEnabled = existing?.isEnabled ?: true,
+                    customBlockedPackages = selectedCustomApps.toSet()
                 )
 
                 val currentList = prefs.getSchedules()
@@ -715,6 +805,46 @@ class MainActivity : AppCompatActivity() {
         }
 
         dialog.show()
+    }
+
+    private fun showScheduleCustomAppsPicker(targetSet: MutableSet<String>, onUpdated: () -> Unit) {
+        val pm = packageManager
+        val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+
+        val launchables = pm.queryIntentActivities(mainIntent, 0)
+            .mapNotNull { it.activityInfo?.applicationInfo }
+            .distinctBy { it.packageName }
+            .filter { app -> !prefs.isAlwaysAllowed(app.packageName) }
+            .sortedBy { pm.getApplicationLabel(it).toString().lowercase() }
+
+        if (launchables.isEmpty()) {
+            Toast.makeText(this, "Nenhum aplicativo encontrado.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val appNames = launchables.map { pm.getApplicationLabel(it).toString() }.toTypedArray()
+        val tempSet = targetSet.toMutableSet()
+        val checkedItems = launchables.map { tempSet.contains(it.packageName) }.toBooleanArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("Apps Específicos deste Horário")
+            .setMultiChoiceItems(appNames, checkedItems) { _, which, isChecked ->
+                val pkg = launchables[which].packageName
+                if (isChecked) tempSet.add(pkg) else tempSet.remove(pkg)
+            }
+            .setPositiveButton("Confirmar") { _, _ ->
+                targetSet.clear()
+                targetSet.addAll(tempSet)
+                onUpdated()
+            }
+            .setNeutralButton("Usar Lista Global") { _, _ ->
+                targetSet.clear()
+                onUpdated()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
     }
 
     private fun showSelectAppsDialog() {
@@ -773,12 +903,30 @@ class MainActivity : AppCompatActivity() {
             val hadSchedule = prefs.isAnyScheduleActiveNow()
             prefs.isManualLockActive = false
             if (hadSchedule) {
-                prefs.snoozeSchedulesForMinutes(15)
-                Toast.makeText(this, "Desbloqueado! (Horários pausados por 15 min)", Toast.LENGTH_LONG).show()
+                val options = arrayOf(
+                    "1 minuto (Olhada rápida - ScreenZen)",
+                    "5 minutos",
+                    "15 minutos",
+                    "30 minutos"
+                )
+                val minutesValues = intArrayOf(1, 5, 15, 30)
+                AlertDialog.Builder(this)
+                    .setTitle("Por quanto tempo deseja pausar os horários?")
+                    .setItems(options) { _, which ->
+                        val mins = minutesValues[which]
+                        prefs.snoozeSchedulesForMinutes(mins)
+                        Toast.makeText(
+                            this,
+                            "Desbloqueado! (Horários pausados por $mins min)",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        updateUI()
+                    }
+                    .show()
             } else {
                 Toast.makeText(this, "Desbloqueado com sucesso!", Toast.LENGTH_SHORT).show()
+                updateUI()
             }
-            updateUI()
         }
     }
 
@@ -1036,10 +1184,20 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.tvBlockedAppsSummary.text = if (blockedCount == 0) {
-            "Apps bloqueados: Todos os apps (exceto WhatsApp)"
+            "Apps bloqueados (Global): Todos os apps (exceto WhatsApp)"
         } else {
-            "Apps bloqueados: $blockedCount aplicativo(s) específico(s)"
+            "Apps bloqueados (Global): $blockedCount aplicativo(s) específico(s)"
         }
+
+        val todayBlocked = prefs.getBlockedAttemptsToday()
+        binding.tvTodayBlockedBadge.text = "🛡️ $todayBlocked tentativa(s) de distração bloqueada(s) hoje"
+
+        binding.tvStrictnessModeInfo.text = when (prefs.strictnessMode) {
+            BlockPreferences.MODE_DEEP_FOCUS_NFC -> "Modo Atual: Deep Focus — Opal/Brick (Exclusivo Tag NFC)"
+            BlockPreferences.MODE_MINDFUL_DELAY -> "Modo Atual: Pausa Consciente — ScreenZen (Espera de 15s)"
+            else -> "Modo Atual: Normal (Senha Mestre ou NFC imediato)"
+        }
+        binding.switchAntiTamper.isChecked = prefs.isAntiTamperEnabled
 
         renderSchedulesList()
     }

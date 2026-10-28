@@ -6,6 +6,9 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.view.inputmethod.InputMethodManager
 import org.json.JSONArray
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class BlockPreferences(private val appContext: Context) {
 
@@ -17,6 +20,45 @@ class BlockPreferences(private val appContext: Context) {
         set(value) {
             prefs.edit().putBoolean(KEY_PASSWORD_CONFIGURED, value).commit()
         }
+
+    var strictnessMode: String
+        get() = prefs.getString(KEY_STRICTNESS_MODE, MODE_MINDFUL_DELAY) ?: MODE_MINDFUL_DELAY
+        set(value) {
+            prefs.edit().putString(KEY_STRICTNESS_MODE, value).commit()
+        }
+
+    var isAntiTamperEnabled: Boolean
+        get() = prefs.getBoolean(KEY_ANTI_TAMPER, true)
+        set(value) {
+            prefs.edit().putBoolean(KEY_ANTI_TAMPER, value).commit()
+        }
+
+    fun getBlockedAttemptsToday(): Int {
+        val today = currentDateKey()
+        val savedDate = prefs.getString(KEY_STATS_DATE, "") ?: ""
+        if (savedDate != today) {
+            return 0
+        }
+        return prefs.getInt(KEY_BLOCKED_ATTEMPTS_TODAY, 0)
+    }
+
+    fun recordBlockedAttempt() {
+        val today = currentDateKey()
+        val savedDate = prefs.getString(KEY_STATS_DATE, "") ?: ""
+        val currentCount = if (savedDate == today) {
+            prefs.getInt(KEY_BLOCKED_ATTEMPTS_TODAY, 0)
+        } else {
+            0
+        }
+        prefs.edit()
+            .putString(KEY_STATS_DATE, today)
+            .putInt(KEY_BLOCKED_ATTEMPTS_TODAY, currentCount + 1)
+            .commit()
+    }
+
+    private fun currentDateKey(): String {
+        return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+    }
 
     var isManualLockActive: Boolean
         get() = prefs.getBoolean(KEY_MANUAL_LOCK, false)
@@ -139,16 +181,27 @@ class BlockPreferences(private val appContext: Context) {
             return false
         }
 
-        val blockedList = getBlockedPackages()
+        val globalBlockedList = getBlockedPackages()
 
         // 2. Bloqueio Manual ativo
         if (isManualLockActive) {
-            return blockedList.isEmpty() || blockedList.contains(packageName)
+            return globalBlockedList.isEmpty() || globalBlockedList.contains(packageName)
         }
 
-        // 3. Verificação de Agendamentos / Blocos de Horário ativos
-        if (isAnyScheduleActiveNow()) {
-            return blockedList.isEmpty() || blockedList.contains(packageName)
+        // 3. Verificação de Agendamentos / Blocos de Horário ativos (com suporte a lista por horário)
+        if (!isScheduleSnoozed()) {
+            val activeSchedules = getSchedules().filter { it.isActiveNow() }
+            for (schedule in activeSchedules) {
+                val scheduleApps = schedule.customBlockedPackages
+                val isBlockedByThisSchedule = if (scheduleApps.isNotEmpty()) {
+                    scheduleApps.contains(packageName)
+                } else {
+                    globalBlockedList.isEmpty() || globalBlockedList.contains(packageName)
+                }
+                if (isBlockedByThisSchedule) {
+                    return true
+                }
+            }
         }
 
         return false
@@ -210,7 +263,15 @@ class BlockPreferences(private val appContext: Context) {
     }
 
     companion object {
+        const val MODE_NORMAL = "NORMAL"
+        const val MODE_MINDFUL_DELAY = "MINDFUL_DELAY"
+        const val MODE_DEEP_FOCUS_NFC = "DEEP_FOCUS_NFC"
+
         private const val KEY_PASSWORD_CONFIGURED = "password_configured"
+        private const val KEY_STRICTNESS_MODE = "strictness_mode"
+        private const val KEY_ANTI_TAMPER = "anti_tamper_enabled"
+        private const val KEY_STATS_DATE = "stats_date"
+        private const val KEY_BLOCKED_ATTEMPTS_TODAY = "blocked_attempts_today"
         private const val KEY_MANUAL_LOCK = "manual_lock"
         private const val KEY_SCHEDULE_SNOOZE_UNTIL = "schedule_snooze_until"
         private const val KEY_NFC_TAG = "nfc_tag_id"

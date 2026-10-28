@@ -36,15 +36,26 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
+            android:gravity="center"
             android:text="Mantenha o foco. Este app está restrito."
             android:textColor="@color/text_secondary"
             android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/tvBlockedStats"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="🛡️ 1 distração bloqueada hoje"
+            android:textColor="@color/accent_green"
+            android:textSize="12sp"
+            android:textStyle="bold" />
 
         <!-- NFC Instruction Card -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
+            android:layout_marginTop="20dp"
             android:background="@drawable/bg_card"
             android:gravity="center"
             android:orientation="vertical"
@@ -69,56 +80,108 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
-                android:text="Encoste na tag de casa para desbloquear"
+                android:text="Encoste na tag de casa para desbloquear instantaneamente"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
         </LinearLayout>
 
-        <!-- Master PIN Input -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="OU DIGITE A SENHA MESTRE"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:letterSpacing="0.08" />
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/tilPin"
-            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+        <!-- Mindful Pause / Deep Focus Container (ScreenZen & Opal Style) -->
+        <LinearLayout
+            android:id="@+id/llMindfulSection"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            app:boxStrokeColor="@color/accent_blue"
-            app:endIconMode="password_toggle"
-            app:endIconTint="@color/text_secondary"
-            app:hintTextColor="@color/accent_blue">
+            android:layout_marginTop="16dp"
+            android:background="@drawable/bg_card"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:visibility="gone">
 
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/etPin"
-                android:layout_width="match_parent"
+            <TextView
+                android:id="@+id/tvMindfulPrompt"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:gravity="center"
-                android:hint="Senha Mestre"
-                android:inputType="textPassword"
-                android:maxLength="64"
-                android:singleLine="true"
+                android:text="🧘 Pausa Consciente: Respire fundo.\nVocê realmente precisa abrir este app agora?"
                 android:textColor="@color/text_white"
-                android:textSize="16sp" />
-        </com.google.android.material.textfield.TextInputLayout>
+                android:textSize="13sp" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnUnlockWithPin"
+            <TextView
+                android:id="@+id/tvMindfulCountdown"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Liberando senha em 15s..."
+                android:textColor="@color/accent_blue"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnEmergencyPinUnlock"
+                style="@style/Widget.MaterialComponents.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Emergência sem Tag NFC (aguardar 30s)"
+                android:textAllCaps="false"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <!-- Master Password Input Container -->
+        <LinearLayout
+            android:id="@+id/llPinSection"
             android:layout_width="match_parent"
-            android:layout_height="52dp"
-            android:layout_marginTop="12dp"
-            android:backgroundTint="@color/accent_blue"
-            android:text="DESBLOQUEAR"
-            android:textColor="@color/text_white"
-            android:textStyle="bold"
-            app:cornerRadius="12dp" />
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:letterSpacing="0.08"
+                android:text="OU DIGITE A SENHA MESTRE"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/tilPin"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                app:boxStrokeColor="@color/accent_blue"
+                app:endIconMode="password_toggle"
+                app:endIconTint="@color/text_secondary"
+                app:hintTextColor="@color/accent_blue">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etPin"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:hint="Senha Mestre"
+                    android:inputType="textPassword"
+                    android:maxLength="64"
+                    android:singleLine="true"
+                    android:textColor="@color/text_white"
+                    android:textSize="16sp" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnUnlockWithPin"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="12dp"
+                android:backgroundTint="@color/accent_blue"
+                android:text="DESBLOQUEAR"
+                android:textColor="@color/text_white"
+                android:textStyle="bold"
+                app:cornerRadius="12dp" />
+        </LinearLayout>
 
         <TextView
             android:id="@+id/tvError"

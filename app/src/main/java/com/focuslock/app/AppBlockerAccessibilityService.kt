@@ -10,10 +10,12 @@ import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
+import android.view.accessibility.AccessibilityNodeInfo
 
 class AppBlockerAccessibilityService : AccessibilityService() {
 
     private var lastBlockedTime = 0L
+    private var lastStatRecordedTime = 0L
     private var currentForegroundPackage = ""
     private val handler = Handler(Looper.getMainLooper())
 
@@ -100,18 +102,80 @@ class AppBlockerAccessibilityService : AccessibilityService() {
             return
         }
 
+        // Proteção Anti-Burla (Strict Mode): bloqueia tentativa de forçar parada/desinstalar/desativar o FocusLock nas Configurações
+        if (prefs.isBlockingCurrentlyActive() && prefs.isAntiTamperEnabled && isSettingsTamperAttempt(packageName)) {
+            lastBlockedTime = now
+            if (now - lastStatRecordedTime > 3000L) {
+                lastStatRecordedTime = now
+                prefs.recordBlockedAttempt()
+            }
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            launchLockScreen("Proteção Anti-Burla (Configurações)")
+            return
+        }
+
         if (prefs.shouldBlockNow(packageName)) {
             lastBlockedTime = now
-            Log.d("AppBlocker", "Bloqueando pacote restrito: $packageName")
-
-            val lockIntent = Intent(this, LockActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                        Intent.FLAG_ACTIVITY_NO_ANIMATION
-                putExtra("BLOCKED_PACKAGE", packageName)
+            if (now - lastStatRecordedTime > 3000L) {
+                lastStatRecordedTime = now
+                prefs.recordBlockedAttempt()
             }
-            startActivity(lockIntent)
+            Log.d("AppBlocker", "Bloqueando pacote restrito: $packageName")
+            launchLockScreen(packageName)
+        }
+    }
+
+    private fun launchLockScreen(blockedPkgOrReason: String) {
+        val lockIntent = Intent(this, LockActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_NO_ANIMATION
+            putExtra("BLOCKED_PACKAGE", blockedPkgOrReason)
+        }
+        startActivity(lockIntent)
+    }
+
+    private fun isSettingsTamperAttempt(packageName: String): Boolean {
+        val lowerPkg = packageName.lowercase()
+        val isSettingsOrInstaller = packageName == "com.android.settings" ||
+                lowerPkg.contains("packageinstaller") ||
+                lowerPkg.contains("securitycenter")
+        if (!isSettingsOrInstaller) return false
+
+        val root = rootInActiveWindow ?: return false
+        val collected = StringBuilder()
+        collectNodeText(root, collected, 0)
+        val screenText = collected.toString().lowercase()
+
+        if (!screenText.contains("focuslock")) {
+            return false
+        }
+
+        val tamperKeywords = listOf(
+            "forçar parada",
+            "force stop",
+            "forçar interrupção",
+            "desinstalar",
+            "uninstall",
+            "usar focuslock",
+            "use focuslock",
+            "desativar serviço",
+            "stop focuslock",
+            "limpar dados",
+            "clear storage",
+            "clear data"
+        )
+        return tamperKeywords.any { screenText.contains(it) }
+    }
+
+    private fun collectNodeText(node: AccessibilityNodeInfo?, sb: StringBuilder, depth: Int) {
+        if (node == null || depth > 7 || sb.length > 3000) return
+        node.text?.let { sb.append(it).append(' ') }
+        node.contentDescription?.let { sb.append(it).append(' ') }
+        val count = node.childCount
+        for (i in 0 until count) {
+            collectNodeText(node.getChild(i), sb, depth + 1)
         }
     }
 
