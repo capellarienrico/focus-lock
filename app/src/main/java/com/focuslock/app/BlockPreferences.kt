@@ -207,6 +207,33 @@ class BlockPreferences(private val appContext: Context) {
         return false
     }
 
+    @Volatile
+    private var cachedAllowedSysPackages: Set<String> = emptySet()
+    @Volatile
+    private var lastCacheTimeMillis: Long = 0L
+
+    private fun getDynamicSystemAllowedPackages(): Set<String> {
+        val now = System.currentTimeMillis()
+        if (now - lastCacheTimeMillis < 60_000L && cachedAllowedSysPackages.isNotEmpty()) {
+            return cachedAllowedSysPackages
+        }
+        val result = mutableSetOf<String>()
+        try {
+            val imm = appContext.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.enabledInputMethodList?.forEach { result.add(it.packageName) }
+        } catch (_: Exception) {
+        }
+        try {
+            val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            val resolveInfo = appContext.packageManager.resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            resolveInfo?.activityInfo?.packageName?.let { result.add(it) }
+        } catch (_: Exception) {
+        }
+        cachedAllowedSysPackages = result
+        lastCacheTimeMillis = now
+        return result
+    }
+
     fun isAlwaysAllowed(packageName: String): Boolean {
         val lower = packageName.lowercase()
 
@@ -231,32 +258,15 @@ class BlockPreferences(private val appContext: Context) {
             lower.contains("securitycenter")
         ) return true
 
-        // Teclados / IMEs (para que o usuário sempre consiga digitar a Senha Mestre)
+        // Teclados / IMEs e Launchers por nome
         if (lower.contains("inputmethod") || lower.contains("keyboard") ||
             lower.contains("gboard") || lower.contains("honeyboard") ||
-            lower.contains("swiftkey") || lower.contains("latinime")
+            lower.contains("swiftkey") || lower.contains("latinime") ||
+            lower.contains("launcher") || lower.contains("home") || lower.contains("trebuchet")
         ) return true
 
-        try {
-            val imm = appContext.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-            val enabledImes = imm?.enabledInputMethodList?.map { it.packageName } ?: emptyList()
-            if (enabledImes.contains(packageName)) return true
-        } catch (_: Exception) {
-        }
-
-        // Launchers (Tela Inicial do Android)
-        if (lower.contains("launcher") || lower.contains("home") || lower.contains("trebuchet")) {
+        if (getDynamicSystemAllowedPackages().contains(packageName)) {
             return true
-        }
-
-        try {
-            val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-            val resolveInfo = appContext.packageManager.resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
-            val defaultLauncher = resolveInfo?.activityInfo?.packageName
-            if (defaultLauncher != null && defaultLauncher == packageName) {
-                return true
-            }
-        } catch (_: Exception) {
         }
 
         return false

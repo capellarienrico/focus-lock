@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
@@ -18,15 +19,24 @@ class AppBlockerAccessibilityService : AccessibilityService() {
     private var lastStatRecordedTime = 0L
     private var currentForegroundPackage = ""
     private val handler = Handler(Looper.getMainLooper())
+    private var powerManager: PowerManager? = null
 
     private val watchdogRunnable = object : Runnable {
         override fun run() {
             try {
-                checkCurrentWindowAndBlock()
+                // Otimização de bateria: zero processamento se a tela estiver desligada
+                val isScreenOn = powerManager?.isInteractive ?: true
+                if (isScreenOn) {
+                    val prefs = (application as? FocusLockApp)?.prefs
+                    // Só inspeciona a janela ativa se o bloqueio manual ou algum horário estiver ativo
+                    if (prefs != null && prefs.isBlockingCurrentlyActive()) {
+                        checkCurrentWindowAndBlock()
+                    }
+                }
             } catch (e: Exception) {
                 Log.e("AppBlocker", "Erro no watchdog", e)
             }
-            handler.postDelayed(this, 500L)
+            handler.postDelayed(this, 1500L)
         }
     }
 
@@ -34,6 +44,7 @@ class AppBlockerAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         isRunning = true
+        powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
 
         try {
             val info = serviceInfo ?: AccessibilityServiceInfo()
@@ -45,7 +56,7 @@ class AppBlockerAccessibilityService : AccessibilityService() {
                     AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS or
                     AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
                     AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-            info.notificationTimeout = 100
+            info.notificationTimeout = 250
             serviceInfo = info
         } catch (e: Exception) {
             Log.e("AppBlocker", "Falha ao atualizar serviceInfo", e)
@@ -93,7 +104,8 @@ class AppBlockerAccessibilityService : AccessibilityService() {
             currentForegroundPackage = packageName
         }
 
-        if (LockActivity.isShowing) {
+        // Otimização de bateria: se não há bloqueio manual nem horário ativo agora, retorna imediatamente sem custo de CPU
+        if (!prefs.isBlockingCurrentlyActive() || LockActivity.isShowing) {
             return
         }
 
