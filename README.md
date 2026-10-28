@@ -11,12 +11,13 @@ Aplicativo Android nativo (Kotlin) desenvolvido para bloqueio de distrações, c
    - Encoste novamente na tag para **desbloquear**.
    - Permite vincular qualquer tag NFC (adesivos, chaveiros, cartões NFC).
 
-2. **Desbloqueio Manual Protegido por Senha Mestre**:
+2. **Desbloqueio Manual Protegido por Senha Mestre Alfanumérica**:
+   - Na primeira vez que você abre o app, o FocusLock solicita prioritariamente a criação da sua **Senha Mestre** (suportando letras, números e caracteres especiais).
    - O bloqueio manual pode ser ativado a qualquer momento com 1 toque.
-   - Para desbloquear manualmente (sem a tag física), o app exige a **Senha Mestre (PIN)**, evitando recaídas e impulsos.
+   - Para desbloquear manualmente (sem a tag física), o app exige a **Senha Mestre**, evitando recaídas e impulsos.
 
-3. **Blocos de Horário (Estilo ScreenZen)**:
-   - Configure janelas automáticas de foco (ex: das 09:00 às 18:00, de Segunda a Sexta).
+3. **Múltiplos Blocos de Horário (Estilo ScreenZen)**:
+   - Crie, edite e exclua quantos blocos de horário quiser (ex: Trabalho das 09:00 às 18:00, Noite das 22:00 às 06:00) escolhendo os dias da semana de cada bloco.
    - O aplicativo monitora os horários em segundo plano e bloqueia os apps restritos no período estipulado.
 
 4. **Exceções Permanentes de Segurança**:

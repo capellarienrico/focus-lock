@@ -88,10 +88,12 @@
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/tilPin"
             style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
-            android:layout_width="220dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             app:boxStrokeColor="@color/accent_blue"
+            app:endIconMode="password_toggle"
+            app:endIconTint="@color/text_secondary"
             app:hintTextColor="@color/accent_blue">
 
             <com.google.android.material.textfield.TextInputEditText
@@ -99,17 +101,18 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center"
-                android:hint="PIN Mestre"
-                android:inputType="numberPassword"
-                android:maxLength="6"
+                android:hint="Senha Mestre"
+                android:inputType="textPassword"
+                android:maxLength="64"
+                android:singleLine="true"
                 android:textColor="@color/text_white"
-                android:textSize="20sp" />
+                android:textSize="16sp" />
         </com.google.android.material.textfield.TextInputLayout>
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnUnlockWithPin"
-            android:layout_width="220dp"
-            android:layout_height="50dp"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
             android:layout_marginTop="12dp"
             android:backgroundTint="@color/accent_blue"
             android:text="DESBLOQUEAR"

@@ -44,7 +44,9 @@
             android:name=".LockActivity"
             android:exported="false"
             android:excludeFromRecents="true"
-            android:launchMode="singleInstance"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:windowSoftInputMode="stateHidden|adjustResize"
             android:showWhenLocked="true"
             android:turnScreenOn="true"
             android:theme="@style/Theme.FocusLock.LockScreen" />

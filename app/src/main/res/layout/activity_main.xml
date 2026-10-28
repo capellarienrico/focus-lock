@@ -31,7 +31,7 @@
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />
 
-        <!-- Accessibility Warning Banner -->
+        <!-- Accessibility & Overlay Warning Banner -->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/cardAccessibilityWarning"
             android:layout_width="match_parent"
@@ -52,16 +52,17 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="⚠️ Ativação Necessária"
+                    android:text="⚠️ Permissões Necessárias para o Bloqueio"
                     android:textColor="@color/accent_red"
-                    android:textStyle="bold"
-                    android:textSize="14sp" />
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
 
                 <TextView
+                    android:id="@+id/tvPermissionWarningDesc"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="O FocusLock precisa do Serviço de Acessibilidade ativo para conseguir bloquear os apps restritos."
+                    android:text="Ative a Acessibilidade e a Sobreposição de Tela para que o FocusLock bloqueie os aplicativos em tempo real."
                     android:textColor="@color/text_white"
                     android:textSize="12sp" />
 
@@ -71,10 +72,31 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
                     android:backgroundTint="@color/accent_red"
-                    android:text="ATIVAR ACESSIBILIDADE"
+                    android:text="ATIVAR SERVIÇO DE ACESSIBILIDADE"
                     android:textColor="@color/text_white"
                     android:textStyle="bold"
                     app:cornerRadius="8dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnEnableOverlay"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="PERMITIR SOBREPOR A OUTROS APPS"
+                    android:textColor="@color/text_white"
+                    app:cornerRadius="8dp"
+                    app:strokeColor="@color/accent_red" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnOpenAppDetails"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Android 13+: Liberar &quot;Configurações Restritas&quot; (3 pontos no topo)"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11sp" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -179,7 +201,7 @@
                 app:strokeColor="@color/accent_blue" />
         </LinearLayout>
 
-        <!-- Schedules Card (ScreenZen style) -->
+        <!-- Schedules Card (Multiple Schedule Blocks) -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -205,35 +227,28 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="10dp"
                     android:layout_weight="1"
-                    android:text="Blocos de Horário (ScreenZen)"
+                    android:text="Blocos de Horário"
                     android:textColor="@color/text_white"
                     android:textSize="15sp"
                     android:textStyle="bold" />
-
-                <androidx.appcompat.widget.SwitchCompat
-                    android:id="@+id/switchSchedule"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" />
             </LinearLayout>
 
             <TextView
-                android:id="@+id/tvScheduleName"
+                android:id="@+id/tvBlockedAppsSummary"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="Horário: 09:00 às 18:00"
-                android:textColor="@color/text_white"
-                android:textSize="14sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/tvScheduleDays"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
-                android:text="Dias: Seg, Ter, Qua, Qui, Sex"
+                android:layout_marginTop="6dp"
+                android:text="Apps bloqueados: Todos (exceto WhatsApp)"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
+
+            <!-- Dynamic List of Schedule Blocks -->
+            <LinearLayout
+                android:id="@+id/llSchedulesContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="vertical" />
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -242,13 +257,13 @@
                 android:orientation="horizontal">
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnEditSchedule"
+                    android:id="@+id/btnAddSchedule"
                     style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
                     android:layout_marginEnd="6dp"
-                    android:text="Editar Horário"
+                    android:layout_weight="1"
+                    android:text="+ Novo Horário"
                     android:textColor="@color/accent_blue"
                     app:cornerRadius="8dp"
                     app:strokeColor="@color/accent_blue" />
@@ -278,11 +293,11 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:letterSpacing="0.05"
                 android:text="EXCEÇÕES PERMANENTES"
                 android:textColor="@color/accent_green"
                 android:textSize="12sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.05" />
+                android:textStyle="bold" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -293,47 +308,61 @@
                 android:textSize="13sp" />
         </LinearLayout>
 
-        <!-- Settings: PIN Card -->
+        <!-- Settings: Master Password Card -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:layout_marginBottom="24dp"
             android:background="@drawable/bg_card"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
+            android:orientation="vertical"
             android:padding="16dp">
 
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Senha Mestre"
-                    android:textColor="@color/text_white"
-                    android:textSize="14sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:text="Necessária para desbloqueio manual"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="12sp" />
-            </LinearLayout>
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnChangePin"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
+            <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Alterar PIN"
-                android:textColor="@color/accent_blue" />
+                android:text="Senha Mestre (Alfanumérica)"
+                android:textColor="@color/text_white"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="Suporta letras, números e caracteres especiais. Você também pode resetar gerando uma senha complexa aleatória."
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnChangePin"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:text="Alterar Senha"
+                    android:textColor="@color/accent_blue"
+                    app:cornerRadius="8dp"
+                    app:strokeColor="@color/accent_blue" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnResetRandomPin"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Reset Aleatório"
+                    android:textColor="@color/accent_green"
+                    app:cornerRadius="8dp"
+                    app:strokeColor="@color/accent_green" />
+            </LinearLayout>
         </LinearLayout>
 
     </LinearLayout>

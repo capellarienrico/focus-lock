@@ -1,9 +1,9 @@
 package com.focuslock.app
 
+import android.accessibilityservice.AccessibilityService
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.os.Build
@@ -29,6 +29,7 @@ class LockActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         setupScreenFlags()
+        updateBlockedAppLabel(intent)
 
         // Botão voltar redireciona para a Home do Android
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -45,6 +46,19 @@ class LockActivity : AppCompatActivity() {
         setupPinUnlock()
     }
 
+    private fun updateBlockedAppLabel(intent: Intent?) {
+        val pkg = intent?.getStringExtra("BLOCKED_PACKAGE")
+        if (!pkg.isNullOrBlank()) {
+            try {
+                val appInfo = packageManager.getApplicationInfo(pkg, 0)
+                val appLabel = packageManager.getApplicationLabel(appInfo).toString()
+                binding.tvBlockedAppName.text = "Mantenha o foco. O app \"$appLabel\" está restrito."
+            } catch (_: Exception) {
+                binding.tvBlockedAppName.text = "Mantenha o foco. Este aplicativo está restrito."
+            }
+        }
+    }
+
     private fun setupScreenFlags() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
@@ -59,11 +73,17 @@ class LockActivity : AppCompatActivity() {
     }
 
     private fun goToHome() {
-        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
-            addCategory(Intent.CATEGORY_HOME)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        isShowing = false
+        val switchedByService = AppBlockerAccessibilityService.instance
+            ?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME) == true
+
+        if (!switchedByService) {
+            val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            startActivity(homeIntent)
         }
-        startActivity(homeIntent)
         finish()
     }
 
@@ -80,30 +100,35 @@ class LockActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        nfcAdapter?.let {
-            val filter = IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED)
-            it.enableForegroundDispatch(this, pendingIntent, arrayOf(filter), null)
-        }
+        isShowing = true
+        nfcAdapter?.enableForegroundDispatch(this, pendingIntent, null, null)
     }
 
     override fun onPause() {
         super.onPause()
+        isShowing = false
         nfcAdapter?.disableForegroundDispatch(this)
+    }
+
+    override fun onDestroy() {
+        isShowing = false
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (NfcAdapter.ACTION_TAG_DISCOVERED == intent.action ||
-            NfcAdapter.ACTION_NDEF_DISCOVERED == intent.action ||
-            NfcAdapter.ACTION_TECH_DISCOVERED == intent.action
-        ) {
-            val tag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
-            }
-            tag?.let { handleNfcTag(it) }
+        setIntent(intent)
+        updateBlockedAppLabel(intent)
+        binding.tvError.visibility = View.GONE
+
+        val tag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
+        }
+        if (tag != null) {
+            handleNfcTag(tag)
         }
     }
 
@@ -123,14 +148,14 @@ class LockActivity : AppCompatActivity() {
 
     private fun setupPinUnlock() {
         binding.btnUnlockWithPin.setOnClickListener {
-            val enteredPin = binding.etPin.text.toString().trim()
+            val enteredPin = binding.etPin.text?.toString()?.trim() ?: ""
             val masterPin = (application as FocusLockApp).prefs.masterPin
 
-            if (enteredPin == masterPin) {
+            if (enteredPin.isNotEmpty() && enteredPin == masterPin) {
                 unlockSuccess("Desbloqueado com Senha Mestre!")
             } else {
                 vibrateError()
-                binding.tvError.text = "Senha incorreta. Tente novamente."
+                binding.tvError.text = "Senha Mestre incorreta. Tente novamente."
                 binding.tvError.visibility = View.VISIBLE
                 binding.etPin.text?.clear()
             }
@@ -139,10 +164,20 @@ class LockActivity : AppCompatActivity() {
 
     private fun unlockSuccess(message: String) {
         val prefs = (application as FocusLockApp).prefs
+        val hadActiveSchedule = prefs.getSchedules().any { it.isActiveNow() }
         prefs.isManualLockActive = false
+        if (hadActiveSchedule) {
+            prefs.snoozeSchedulesForMinutes(15)
+        }
 
+        isShowing = false
         vibrateSuccess()
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        val finalMsg = if (hadActiveSchedule) {
+            "$message (Horário pausado por 15 min)"
+        } else {
+            message
+        }
+        Toast.makeText(this, finalMsg, Toast.LENGTH_LONG).show()
         finish()
     }
 
@@ -173,5 +208,10 @@ class LockActivity : AppCompatActivity() {
             sb.append(String.format("%02X:", b))
         }
         return if (sb.isNotEmpty()) sb.substring(0, sb.length - 1) else ""
+    }
+
+    companion object {
+        @Volatile
+        var isShowing: Boolean = false
     }
 }

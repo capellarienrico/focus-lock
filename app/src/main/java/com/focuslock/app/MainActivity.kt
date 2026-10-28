@@ -1,27 +1,39 @@
 package com.focuslock.app
 
-import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.PendingIntent
 import android.app.TimePickerDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
-import android.content.pm.ApplicationInfo
-import android.content.pm.PackageManager
+import android.graphics.Typeface
+import android.net.Uri
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.text.InputType
+import android.text.method.HideReturnsTransformationMethod
+import android.text.method.PasswordTransformationMethod
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.View
-import android.view.accessibility.AccessibilityManager
+import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
 import com.focuslock.app.databinding.ActivityMainBinding
+import com.google.android.material.button.MaterialButton
+import java.security.SecureRandom
 import java.util.Calendar
+import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
 
@@ -30,6 +42,7 @@ class MainActivity : AppCompatActivity() {
     private var nfcAdapter: NfcAdapter? = null
     private var pendingIntent: PendingIntent? = null
     private var isWaitingForNfcRegistration = false
+    private var isFirstSetupDialogShowing = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,19 +56,121 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        checkAccessibilityPermission()
+        checkFirstTimePasswordSetup()
+        checkPermissionsStatus()
         checkNfcStatus()
         updateUI()
 
-        nfcAdapter?.let {
-            val filter = IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED)
-            it.enableForegroundDispatch(this, pendingIntent, arrayOf(filter), null)
-        }
+        nfcAdapter?.enableForegroundDispatch(this, pendingIntent, null, null)
     }
 
     override fun onPause() {
         super.onPause()
         nfcAdapter?.disableForegroundDispatch(this)
+    }
+
+    private fun checkFirstTimePasswordSetup() {
+        if (prefs.isMasterPasswordConfigured || isFirstSetupDialogShowing) {
+            return
+        }
+        isFirstSetupDialogShowing = true
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = dpToPx(20)
+            setPadding(pad, dpToPx(12), pad, dpToPx(4))
+        }
+
+        val infoText = TextView(this).apply {
+            text = "Bem-vindo ao FocusLock! Antes de começar, defina sua Senha Mestre alfanumérica (pode conter letras, números e símbolos, mínimo de 4 caracteres)."
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+            textSize = 13f
+        }
+
+        val inputPass = EditText(this).apply {
+            hint = "Crie sua Senha Mestre (ex: Foco2026)"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+        }
+
+        val inputConfirm = EditText(this).apply {
+            hint = "Confirme a Senha Mestre"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+        }
+
+        val cbShowPass = CheckBox(this).apply {
+            text = "Mostrar senhas"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+            setOnCheckedChangeListener { _, isChecked ->
+                val method = if (isChecked) {
+                    HideReturnsTransformationMethod.getInstance()
+                } else {
+                    PasswordTransformationMethod.getInstance()
+                }
+                inputPass.transformationMethod = method
+                inputConfirm.transformationMethod = method
+                inputPass.setSelection(inputPass.text?.length ?: 0)
+                inputConfirm.setSelection(inputConfirm.text?.length ?: 0)
+            }
+        }
+
+        val btnGenerateFirstPass = MaterialButton(
+            this,
+            null,
+            com.google.android.material.R.attr.materialButtonOutlinedStyle
+        ).apply {
+            text = "Gerar Senha Aleatória Complexa e Copiar"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accent_green))
+            textSize = 12f
+            setOnClickListener {
+                val generated = generateComplexPassword(16)
+                inputPass.setText(generated)
+                inputConfirm.setText(generated)
+                cbShowPass.isChecked = true
+                copyPasswordToClipboard(generated)
+            }
+        }
+
+        container.addView(infoText)
+        container.addView(inputPass)
+        container.addView(inputConfirm)
+        container.addView(cbShowPass)
+        container.addView(btnGenerateFirstPass)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Configurar Senha Mestre")
+            .setView(container)
+            .setCancelable(false)
+            .setPositiveButton("Salvar Senha", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val p1 = inputPass.text?.toString()?.trim() ?: ""
+                val p2 = inputConfirm.text?.toString()?.trim() ?: ""
+
+                when {
+                    p1.length < 4 -> {
+                        inputPass.error = "A senha deve ter pelo menos 4 caracteres"
+                    }
+                    p1 != p2 -> {
+                        inputConfirm.error = "As senhas não coincidem"
+                    }
+                    else -> {
+                        prefs.masterPin = p1
+                        isFirstSetupDialogShowing = false
+                        Toast.makeText(this, "Senha Mestre configurada com sucesso!", Toast.LENGTH_SHORT).show()
+                        dialog.dismiss()
+                        updateUI()
+                    }
+                }
+            }
+        }
+
+        dialog.show()
     }
 
     private fun setupNfc() {
@@ -79,18 +194,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (NfcAdapter.ACTION_TAG_DISCOVERED == intent.action ||
-            NfcAdapter.ACTION_NDEF_DISCOVERED == intent.action ||
-            NfcAdapter.ACTION_TECH_DISCOVERED == intent.action
-        ) {
-            val tag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
-            }
-            tag?.let { handleNfcTag(it) }
+        val tag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
         }
+        tag?.let { handleNfcTag(it) }
     }
 
     private fun handleNfcTag(tag: Tag) {
@@ -106,22 +216,50 @@ class MainActivity : AppCompatActivity() {
 
         val registered = prefs.registeredNfcTagId
         if (registered == null || registered == tagId) {
-            prefs.isManualLockActive = !prefs.isManualLockActive
-            val msg = if (prefs.isManualLockActive) "Modo Foco Ativado via NFC!" else "Modo Foco Desativado via NFC!"
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+            if (prefs.isBlockingCurrentlyActive()) {
+                val hadSchedule = prefs.isAnyScheduleActiveNow()
+                prefs.isManualLockActive = false
+                if (hadSchedule) {
+                    prefs.snoozeSchedulesForMinutes(15)
+                }
+                Toast.makeText(this, "Modo Foco Desativado via NFC!", Toast.LENGTH_SHORT).show()
+            } else {
+                if (!ensureAccessibilityBeforeLock()) return
+                prefs.isManualLockActive = true
+                Toast.makeText(this, "Modo Foco Ativado via NFC!", Toast.LENGTH_SHORT).show()
+            }
             updateUI()
         } else {
             Toast.makeText(this, "Tag NFC não reconhecida.", Toast.LENGTH_SHORT).show()
         }
     }
 
+    private fun ensureAccessibilityBeforeLock(): Boolean {
+        if (!AppBlockerAccessibilityService.isServiceEnabled(this)) {
+            AlertDialog.Builder(this)
+                .setTitle("Serviço de Acessibilidade Desativado")
+                .setMessage(
+                    "Para que o FocusLock consiga bloquear os aplicativos, você precisa ativar o serviço \"FocusLock\" em Configurações -> Acessibilidade.\n\n" +
+                            "Dica (Android 13+): Se a opção estiver cinza (\"Configuração restrita\"), toque primeiro em \"Liberar Configurações Restritas\" no card vermelho da tela inicial."
+                )
+                .setPositiveButton("Abrir Acessibilidade") { _, _ ->
+                    startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
+            return false
+        }
+        return true
+    }
+
     private fun setupListeners() {
         binding.btnToggleLock.setOnClickListener {
-            if (prefs.isManualLockActive) {
+            if (prefs.isBlockingCurrentlyActive()) {
                 promptPinToUnlock()
             } else {
+                if (!ensureAccessibilityBeforeLock()) return@setOnClickListener
                 prefs.isManualLockActive = true
-                Toast.makeText(this, "Bloqueio ativado! Todos os apps bloqueados exceto WhatsApp.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Bloqueio ativado com sucesso!", Toast.LENGTH_SHORT).show()
                 updateUI()
             }
         }
@@ -137,6 +275,10 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (prefs.registeredNfcTagId != null) {
+                if (prefs.isBlockingCurrentlyActive()) {
+                    Toast.makeText(this, "Desbloqueie o FocusLock antes de alterar ou remover a Tag NFC.", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
                 AlertDialog.Builder(this)
                     .setTitle("Tag NFC")
                     .setMessage("Tag atual: ${prefs.registeredNfcTagId}\nDeseja remover ou registrar outra?")
@@ -161,168 +303,729 @@ class MainActivity : AppCompatActivity() {
             promptChangePin()
         }
 
+        binding.btnResetRandomPin.setOnClickListener {
+            showRandomPasswordResetDialog()
+        }
+
         binding.btnEnableAccessibility.setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
 
-        // Bloco de horário
-        val schedules = prefs.getSchedules()
-        if (schedules.isNotEmpty()) {
-            val sched = schedules[0]
-            binding.switchSchedule.isChecked = sched.isEnabled
-            binding.switchSchedule.setOnCheckedChangeListener { _, isChecked ->
-                val updated = schedules.toMutableList()
-                updated[0] = sched.copy(isEnabled = isChecked)
-                prefs.saveSchedules(updated)
-                Toast.makeText(this, if (isChecked) "Bloco ativado!" else "Bloco desativado.", Toast.LENGTH_SHORT).show()
+        binding.btnEnableOverlay.setOnClickListener {
+            try {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName")
+                )
+                startActivity(intent)
+            } catch (_: Exception) {
+                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
             }
         }
 
-        binding.btnEditSchedule.setOnClickListener {
-            showEditScheduleDialog()
+        binding.btnOpenAppDetails.setOnClickListener {
+            try {
+                val intent = Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:$packageName")
+                )
+                startActivity(intent)
+                Toast.makeText(
+                    this,
+                    "Toque nos 3 pontos (canto superior direito) e selecione \"Permitir configurações restritas\".",
+                    Toast.LENGTH_LONG
+                ).show()
+            } catch (_: Exception) {
+                startActivity(Intent(Settings.ACTION_SETTINGS))
+            }
+        }
+
+        binding.btnAddSchedule.setOnClickListener {
+            showAddOrEditScheduleDialog(null)
         }
 
         binding.btnSelectApps.setOnClickListener {
-            showSelectAppsDialog()
+            if (prefs.isBlockingCurrentlyActive()) {
+                verifyPasswordThen("Insira a Senha Mestre para alterar a lista de apps bloqueados:") {
+                    showSelectAppsDialog()
+                }
+            } else {
+                showSelectAppsDialog()
+            }
         }
     }
 
-    private fun showEditScheduleDialog() {
-        val schedules = prefs.getSchedules()
-        if (schedules.isEmpty()) return
-        val sched = schedules[0]
-
-        // Selecionar início
-        TimePickerDialog(this, { _, startHour, startMinute ->
-            // Selecionar fim
-            TimePickerDialog(this, { _, endHour, endMinute ->
-                val updated = sched.copy(
-                    startHour = startHour,
-                    startMinute = startMinute,
-                    endHour = endHour,
-                    endMinute = endMinute
-                )
-                val list = schedules.toMutableList()
-                list[0] = updated
-                prefs.saveSchedules(list)
-                Toast.makeText(this, "Horário atualizado com sucesso!", Toast.LENGTH_SHORT).show()
-                updateUI()
-            }, sched.endHour, sched.endMinute, true).apply {
-                setTitle("Horário de Término do Foco")
-                show()
-            }
-        }, sched.startHour, sched.startMinute, true).apply {
-            setTitle("Horário de Início do Foco")
-            show()
+    private fun verifyPasswordThen(message: String, onVerified: () -> Unit) {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = dpToPx(20)
+            setPadding(pad, dpToPx(8), pad, 0)
         }
+
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            hint = "Digite a Senha Mestre"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+        }
+
+        val cbShow = CheckBox(this).apply {
+            text = "Mostrar senha"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+            setOnCheckedChangeListener { _, isChecked ->
+                input.transformationMethod = if (isChecked) {
+                    HideReturnsTransformationMethod.getInstance()
+                } else {
+                    PasswordTransformationMethod.getInstance()
+                }
+                input.setSelection(input.text?.length ?: 0)
+            }
+        }
+
+        container.addView(input)
+        container.addView(cbShow)
+
+        AlertDialog.Builder(this)
+            .setTitle("Confirmação de Segurança")
+            .setMessage(message)
+            .setView(container)
+            .setPositiveButton("Confirmar") { _, _ ->
+                val entered = input.text?.toString()?.trim() ?: ""
+                if (entered == prefs.masterPin) {
+                    onVerified()
+                } else {
+                    Toast.makeText(this, "Senha Mestre incorreta!", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun renderSchedulesList() {
+        binding.llSchedulesContainer.removeAllViews()
+        val schedules = prefs.getSchedules()
+
+        if (schedules.isEmpty()) {
+            val emptyTv = TextView(this).apply {
+                text = "Nenhum bloco de horário configurado. Toque em \"+ Novo Horário\" para criar."
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+                textSize = 13f
+                setPadding(0, dpToPx(8), 0, dpToPx(8))
+            }
+            binding.llSchedulesContainer.addView(emptyTv)
+            return
+        }
+
+        schedules.forEachIndexed { index, schedule ->
+            val itemCard = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundResource(R.drawable.bg_card)
+                val pad = dpToPx(12)
+                setPadding(pad, pad, pad, pad)
+                val params = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    if (index > 0) topMargin = dpToPx(8)
+                }
+                layoutParams = params
+            }
+
+            val topRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+
+            val textContainer = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+
+            val isCurrentlyActive = schedule.isActiveNow() && !prefs.isScheduleSnoozed()
+            val titleTv = TextView(this).apply {
+                text = "${schedule.name} • ${schedule.formatTimeRange()}"
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+                textSize = 14f
+                setTypeface(typeface, Typeface.BOLD)
+            }
+
+            val subtitleTv = TextView(this).apply {
+                val statusBadge = if (isCurrentlyActive) " • ATIVO AGORA" else ""
+                text = "Dias: ${schedule.formatDaysOfWeek()}$statusBadge"
+                setTextColor(
+                    ContextCompat.getColor(
+                        this@MainActivity,
+                        if (isCurrentlyActive) R.color.accent_green else R.color.text_secondary
+                    )
+                )
+                textSize = 12f
+            }
+
+            textContainer.addView(titleTv)
+            textContainer.addView(subtitleTv)
+
+            val toggle = SwitchCompat(this).apply {
+                isChecked = schedule.isEnabled
+                setOnClickListener {
+                    val targetState = isChecked
+                    if (!targetState && schedule.isActiveNow() && !prefs.isScheduleSnoozed()) {
+                        // Reverte visualmente até digitar a senha
+                        isChecked = true
+                        verifyPasswordThen("Este bloco está ativo agora. Digite a Senha Mestre para desativá-lo:") {
+                            updateScheduleEnabled(schedule.id, false)
+                        }
+                    } else {
+                        if (targetState && !ensureAccessibilityBeforeLock()) {
+                            isChecked = false
+                            return@setOnClickListener
+                        }
+                        updateScheduleEnabled(schedule.id, targetState)
+                    }
+                }
+            }
+
+            topRow.addView(textContainer)
+            topRow.addView(toggle)
+
+            val actionsRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.END
+                val params = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    topMargin = dpToPx(6)
+                }
+                layoutParams = params
+            }
+
+            val btnEdit = MaterialButton(
+                this,
+                null,
+                com.google.android.material.R.attr.borderlessButtonStyle
+            ).apply {
+                text = "Editar"
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accent_blue))
+                textSize = 12f
+                minHeight = dpToPx(36)
+                minimumHeight = dpToPx(36)
+                setOnClickListener {
+                    if (schedule.isActiveNow() && !prefs.isScheduleSnoozed()) {
+                        verifyPasswordThen("Digite a Senha Mestre para editar um horário em andamento:") {
+                            showAddOrEditScheduleDialog(schedule)
+                        }
+                    } else {
+                        showAddOrEditScheduleDialog(schedule)
+                    }
+                }
+            }
+
+            val btnDelete = MaterialButton(
+                this,
+                null,
+                com.google.android.material.R.attr.borderlessButtonStyle
+            ).apply {
+                text = "Excluir"
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accent_red))
+                textSize = 12f
+                minHeight = dpToPx(36)
+                minimumHeight = dpToPx(36)
+                setOnClickListener {
+                    val deleteAction = {
+                        val updated = prefs.getSchedules().filterNot { it.id == schedule.id }
+                        prefs.saveSchedules(updated)
+                        Toast.makeText(this@MainActivity, "Horário removido.", Toast.LENGTH_SHORT).show()
+                        updateUI()
+                    }
+                    if (schedule.isActiveNow() && !prefs.isScheduleSnoozed()) {
+                        verifyPasswordThen("Digite a Senha Mestre para excluir um horário em andamento:") {
+                            deleteAction()
+                        }
+                    } else {
+                        deleteAction()
+                    }
+                }
+            }
+
+            actionsRow.addView(btnEdit)
+            actionsRow.addView(btnDelete)
+
+            itemCard.addView(topRow)
+            itemCard.addView(actionsRow)
+
+            binding.llSchedulesContainer.addView(itemCard)
+        }
+    }
+
+    private fun updateScheduleEnabled(scheduleId: String, enabled: Boolean) {
+        val list = prefs.getSchedules()
+        val idx = list.indexOfFirst { it.id == scheduleId }
+        if (idx >= 0) {
+            list[idx] = list[idx].copy(isEnabled = enabled)
+            if (enabled) {
+                prefs.scheduleSnoozeUntilMillis = 0L
+            }
+            prefs.saveSchedules(list)
+            Toast.makeText(
+                this,
+                if (enabled) "Bloco de horário ativado!" else "Bloco de horário desativado.",
+                Toast.LENGTH_SHORT
+            ).show()
+            updateUI()
+        }
+    }
+
+    private fun showAddOrEditScheduleDialog(existing: BlockSchedule?) {
+        var selectedStartHour = existing?.startHour ?: 9
+        var selectedStartMinute = existing?.startMinute ?: 0
+        var selectedEndHour = existing?.endHour ?: 18
+        var selectedEndMinute = existing?.endMinute ?: 0
+        val selectedDays = (existing?.daysOfWeek ?: listOf(1, 2, 3, 4, 5, 6, 7)).toMutableSet()
+
+        val scrollView = ScrollView(this)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = dpToPx(20)
+            setPadding(pad, dpToPx(12), pad, dpToPx(8))
+        }
+        scrollView.addView(container)
+
+        val nameInput = EditText(this).apply {
+            hint = "Nome do bloco (ex: Trabalho, Estudos, Noite)"
+            setText(existing?.name ?: "Bloco de Foco")
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+        }
+        container.addView(nameInput)
+
+        val timeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            val params = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dpToPx(12)
+            }
+            layoutParams = params
+        }
+
+        val btnStartTime = MaterialButton(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginEnd = dpToPx(6)
+            }
+            text = String.format("Início: %02d:%02d", selectedStartHour, selectedStartMinute)
+            setOnClickListener {
+                TimePickerDialog(this@MainActivity, { _, h, m ->
+                    selectedStartHour = h
+                    selectedStartMinute = m
+                    text = String.format("Início: %02d:%02d", h, m)
+                }, selectedStartHour, selectedStartMinute, true).show()
+            }
+        }
+
+        val btnEndTime = MaterialButton(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            text = String.format("Fim: %02d:%02d", selectedEndHour, selectedEndMinute)
+            setOnClickListener {
+                TimePickerDialog(this@MainActivity, { _, h, m ->
+                    selectedEndHour = h
+                    selectedEndMinute = m
+                    text = String.format("Fim: %02d:%02d", h, m)
+                }, selectedEndHour, selectedEndMinute, true).show()
+            }
+        }
+
+        timeRow.addView(btnStartTime)
+        timeRow.addView(btnEndTime)
+        container.addView(timeRow)
+
+        val daysLabel = TextView(this).apply {
+            text = "Dias da semana ativos:"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+            textSize = 13f
+            setPadding(0, dpToPx(12), 0, dpToPx(4))
+        }
+        container.addView(daysLabel)
+
+        val dayOptions = listOf(
+            Calendar.MONDAY to "Segunda-feira",
+            Calendar.TUESDAY to "Terça-feira",
+            Calendar.WEDNESDAY to "Quarta-feira",
+            Calendar.THURSDAY to "Quinta-feira",
+            Calendar.FRIDAY to "Sexta-feira",
+            Calendar.SATURDAY to "Sábado",
+            Calendar.SUNDAY to "Domingo"
+        )
+
+        dayOptions.forEach { (dayConst, dayName) ->
+            val cb = CheckBox(this).apply {
+                text = dayName
+                isChecked = selectedDays.contains(dayConst)
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+                setOnCheckedChangeListener { _, checked ->
+                    if (checked) selectedDays.add(dayConst) else selectedDays.remove(dayConst)
+                }
+            }
+            container.addView(cb)
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(if (existing == null) "Novo Bloco de Horário" else "Editar Bloco de Horário")
+            .setView(scrollView)
+            .setPositiveButton("Salvar", null)
+            .setNegativeButton("Cancelar", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val name = nameInput.text?.toString()?.trim().takeUnless { it.isNullOrBlank() } ?: "Bloco de Foco"
+                if (selectedDays.isEmpty()) {
+                    Toast.makeText(this, "Selecione pelo menos um dia da semana.", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+
+                val newSchedule = BlockSchedule(
+                    id = existing?.id ?: UUID.randomUUID().toString(),
+                    name = name,
+                    startHour = selectedStartHour,
+                    startMinute = selectedStartMinute,
+                    endHour = selectedEndHour,
+                    endMinute = selectedEndMinute,
+                    daysOfWeek = selectedDays.sorted(),
+                    isEnabled = existing?.isEnabled ?: true
+                )
+
+                val currentList = prefs.getSchedules()
+                val existingIndex = currentList.indexOfFirst { it.id == newSchedule.id }
+                if (existingIndex >= 0) {
+                    currentList[existingIndex] = newSchedule
+                } else {
+                    currentList.add(newSchedule)
+                }
+                prefs.scheduleSnoozeUntilMillis = 0L
+                prefs.saveSchedules(currentList)
+                Toast.makeText(this, "Bloco de horário salvo!", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+                updateUI()
+
+                if (newSchedule.isEnabled) {
+                    ensureAccessibilityBeforeLock()
+                }
+            }
+        }
+
+        dialog.show()
     }
 
     private fun showSelectAppsDialog() {
         val pm = packageManager
-        val packages = pm.getInstalledApplications(PackageManager.GET_META_DATA)
-            .filter { app ->
-                (app.flags and ApplicationInfo.FLAG_SYSTEM) == 0 &&
-                        app.packageName != packageName &&
-                        app.packageName != "com.whatsapp" &&
-                        app.packageName != "com.whatsapp.w4b"
-            }
-            .sortedBy { pm.getApplicationLabel(it).toString() }
+        val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
 
-        if (packages.isEmpty()) {
-            Toast.makeText(this, "Nenhum aplicativo de terceiros encontrado.", Toast.LENGTH_SHORT).show()
+        val launchables = pm.queryIntentActivities(mainIntent, 0)
+            .mapNotNull { it.activityInfo?.applicationInfo }
+            .distinctBy { it.packageName }
+            .filter { app -> !prefs.isAlwaysAllowed(app.packageName) }
+            .sortedBy { pm.getApplicationLabel(it).toString().lowercase() }
+
+        if (launchables.isEmpty()) {
+            Toast.makeText(this, "Nenhum aplicativo bloqueável encontrado.", Toast.LENGTH_SHORT).show()
             return
         }
 
-        val appNames = packages.map { pm.getApplicationLabel(it).toString() }.toTypedArray()
+        val appNames = launchables.map { pm.getApplicationLabel(it).toString() }.toTypedArray()
         val currentBlocked = prefs.getBlockedPackages().toMutableSet()
-        val checkedItems = packages.map { currentBlocked.contains(it.packageName) }.toBooleanArray()
+        val checkedItems = launchables.map { currentBlocked.contains(it.packageName) }.toBooleanArray()
 
         AlertDialog.Builder(this)
             .setTitle("Escolher Apps para Bloquear")
             .setMultiChoiceItems(appNames, checkedItems) { _, which, isChecked ->
-                val pkg = packages[which].packageName
+                val pkg = launchables[which].packageName
                 if (isChecked) {
                     currentBlocked.add(pkg)
                 } else {
                     currentBlocked.remove(pkg)
                 }
             }
-            .setPositiveButton("Salvar") { _, _ ->
+            .setPositiveButton("Salvar Seleção") { _, _ ->
                 prefs.saveBlockedPackages(currentBlocked)
                 val count = currentBlocked.size
-                Toast.makeText(this, "$count aplicativo(s) configurado(s) para bloqueio.", Toast.LENGTH_SHORT).show()
+                val msg = if (count == 0) {
+                    "Configurado para bloquear TODOS os apps (exceto WhatsApp)."
+                } else {
+                    "$count aplicativo(s) selecionado(s) para bloqueio."
+                }
+                Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                updateUI()
+            }
+            .setNeutralButton("Bloquear Todos") { _, _ ->
+                prefs.saveBlockedPackages(emptySet())
+                Toast.makeText(this, "Todos os apps (exceto WhatsApp) serão bloqueados.", Toast.LENGTH_SHORT).show()
+                updateUI()
             }
             .setNegativeButton("Cancelar", null)
             .show()
     }
 
     private fun promptPinToUnlock() {
-        val input = EditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
-            hint = "Digite o PIN Mestre"
-            textSize = 18f
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle("Desbloqueio com Senha Mestre")
-            .setMessage("Insira seu PIN para liberar os aplicativos sem a tag NFC:")
-            .setView(input)
-            .setPositiveButton("Desbloquear") { _, _ ->
-                val pin = input.text.toString().trim()
-                if (pin == prefs.masterPin) {
-                    prefs.isManualLockActive = false
-                    Toast.makeText(this, "Desbloqueado com sucesso!", Toast.LENGTH_SHORT).show()
-                    updateUI()
-                } else {
-                    Toast.makeText(this, "Senha incorreta!", Toast.LENGTH_SHORT).show()
-                }
+        verifyPasswordThen("Insira sua Senha Mestre alfanumérica para liberar os aplicativos:") {
+            val hadSchedule = prefs.isAnyScheduleActiveNow()
+            prefs.isManualLockActive = false
+            if (hadSchedule) {
+                prefs.snoozeSchedulesForMinutes(15)
+                Toast.makeText(this, "Desbloqueado! (Horários pausados por 15 min)", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(this, "Desbloqueado com sucesso!", Toast.LENGTH_SHORT).show()
             }
-            .setNegativeButton("Cancelar", null)
-            .show()
+            updateUI()
+        }
     }
 
     private fun promptChangePin() {
-        val input = EditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
-            hint = "Novo PIN (4 a 6 dígitos)"
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = dpToPx(20)
+            setPadding(pad, dpToPx(12), pad, dpToPx(4))
         }
 
-        AlertDialog.Builder(this)
-            .setTitle("Alterar Senha Mestre")
-            .setMessage("Digite o novo PIN:")
-            .setView(input)
-            .setPositiveButton("Salvar") { _, _ ->
-                val newPin = input.text.toString().trim()
-                if (newPin.length >= 4) {
-                    prefs.masterPin = newPin
-                    Toast.makeText(this, "PIN Mestre alterado com sucesso!", Toast.LENGTH_SHORT).show()
+        val inputCurrent = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            hint = "Senha Mestre Atual"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+        }
+
+        val inputNew = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            hint = "Nova Senha Mestre (letras e números)"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+        }
+
+        val inputConfirm = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            hint = "Confirmar Nova Senha"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+        }
+
+        val cbShow = CheckBox(this).apply {
+            text = "Mostrar senhas"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+            setOnCheckedChangeListener { _, isChecked ->
+                val method = if (isChecked) {
+                    HideReturnsTransformationMethod.getInstance()
                 } else {
-                    Toast.makeText(this, "O PIN deve ter no mínimo 4 dígitos.", Toast.LENGTH_SHORT).show()
+                    PasswordTransformationMethod.getInstance()
                 }
+                inputCurrent.transformationMethod = method
+                inputNew.transformationMethod = method
+                inputConfirm.transformationMethod = method
+            }
+        }
+
+        container.addView(inputCurrent)
+        container.addView(inputNew)
+        container.addView(inputConfirm)
+        container.addView(cbShow)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Alterar Senha Mestre")
+            .setView(container)
+            .setPositiveButton("Salvar", null)
+            .setNegativeButton("Cancelar", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val curr = inputCurrent.text?.toString()?.trim() ?: ""
+                val newPass = inputNew.text?.toString()?.trim() ?: ""
+                val confirmPass = inputConfirm.text?.toString()?.trim() ?: ""
+
+                when {
+                    curr != prefs.masterPin -> {
+                        inputCurrent.error = "Senha atual incorreta"
+                    }
+                    newPass.length < 4 -> {
+                        inputNew.error = "Mínimo de 4 caracteres (letras/números)"
+                    }
+                    newPass != confirmPass -> {
+                        inputConfirm.error = "As senhas não coincidem"
+                    }
+                    else -> {
+                        prefs.masterPin = newPass
+                        Toast.makeText(this, "Senha Mestre alterada com sucesso!", Toast.LENGTH_SHORT).show()
+                        dialog.dismiss()
+                    }
+                }
+            }
+        }
+
+        dialog.show()
+    }
+
+    private fun showRandomPasswordResetDialog() {
+        var generatedPassword = generateComplexPassword(16)
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = dpToPx(20)
+            setPadding(pad, dpToPx(12), pad, dpToPx(8))
+        }
+
+        val infoTv = TextView(this).apply {
+            text = "Uma nova senha complexa e aleatória foi gerada. Copie-a e guarde em um local seguro antes de aplicar o reset:"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+            textSize = 13f
+        }
+
+        val passwordDisplay = TextView(this).apply {
+            text = generatedPassword
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accent_green))
+            textSize = 18f
+            typeface = Typeface.MONOSPACE
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setBackgroundResource(R.drawable.bg_card)
+            val pad = dpToPx(14)
+            setPadding(pad, pad, pad, pad)
+            setTextIsSelectable(true)
+            val params = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dpToPx(12)
+                bottomMargin = dpToPx(12)
+            }
+            layoutParams = params
+        }
+
+        val actionsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        val btnCopy = MaterialButton(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginEnd = dpToPx(6)
+            }
+            text = "Copiar Senha"
+            setOnClickListener {
+                copyPasswordToClipboard(generatedPassword)
+            }
+        }
+
+        val btnRegenerate = MaterialButton(
+            this,
+            null,
+            com.google.android.material.R.attr.materialButtonOutlinedStyle
+        ).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            text = "Gerar Outra"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accent_blue))
+            setOnClickListener {
+                generatedPassword = generateComplexPassword(16)
+                passwordDisplay.text = generatedPassword
+            }
+        }
+
+        actionsRow.addView(btnCopy)
+        actionsRow.addView(btnRegenerate)
+
+        container.addView(infoTv)
+        container.addView(passwordDisplay)
+        container.addView(actionsRow)
+
+        AlertDialog.Builder(this)
+            .setTitle("Reset de Senha (Aleatória)")
+            .setView(container)
+            .setPositiveButton("Aplicar Reset e Copiar") { _, _ ->
+                prefs.masterPin = generatedPassword
+                copyPasswordToClipboard(generatedPassword)
+                Toast.makeText(
+                    this,
+                    "Senha Mestre resetada e copiada para a área de transferência!",
+                    Toast.LENGTH_LONG
+                ).show()
+                updateUI()
             }
             .setNegativeButton("Cancelar", null)
             .show()
     }
 
+    private fun generateComplexPassword(length: Int = 16): String {
+        val upper = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+        val lower = "abcdefghijkmnopqrstuvwxyz"
+        val digits = "23456789"
+        val symbols = "!@#$%&*?-_"
+        val allChars = upper + lower + digits + symbols
+        val random = SecureRandom()
+
+        val passwordChars = mutableListOf<Char>()
+        // Garantir complexidade (maiúsculas, minúsculas, números e símbolos)
+        repeat(3) { passwordChars.add(upper[random.nextInt(upper.length)]) }
+        repeat(3) { passwordChars.add(lower[random.nextInt(lower.length)]) }
+        repeat(3) { passwordChars.add(digits[random.nextInt(digits.length)]) }
+        repeat(3) { passwordChars.add(symbols[random.nextInt(symbols.length)]) }
+
+        while (passwordChars.size < length) {
+            passwordChars.add(allChars[random.nextInt(allChars.length)])
+        }
+
+        // Embaralhar usando SecureRandom
+        for (i in passwordChars.indices.reversed()) {
+            val j = random.nextInt(i + 1)
+            val tmp = passwordChars[i]
+            passwordChars[i] = passwordChars[j]
+            passwordChars[j] = tmp
+        }
+
+        return passwordChars.joinToString("")
+    }
+
+    private fun copyPasswordToClipboard(password: String) {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = ClipData.newPlainText("Senha Mestre FocusLock", password)
+        clipboard.setPrimaryClip(clip)
+        Toast.makeText(this, "Senha copiada para a área de transferência!", Toast.LENGTH_SHORT).show()
+    }
+
     private fun updateUI() {
-        val isLocked = prefs.isManualLockActive
+        val isManual = prefs.isManualLockActive
+        val isScheduleActive = prefs.isAnyScheduleActiveNow()
+        val isLocked = isManual || isScheduleActive
+        val blockedCount = prefs.getBlockedPackages().size
 
         if (isLocked) {
             binding.ivLockStatus.setImageResource(R.drawable.ic_lock)
             binding.ivLockStatus.setColorFilter(ContextCompat.getColor(this, R.color.accent_red))
-            binding.tvLockStatus.text = "STATUS: BLOQUEADO"
+            binding.tvLockStatus.text = if (isManual) {
+                "STATUS: BLOQUEIO MANUAL ATIVO"
+            } else {
+                "STATUS: HORÁRIO DE FOCO ATIVO"
+            }
             binding.tvLockStatus.setTextColor(ContextCompat.getColor(this, R.color.accent_red))
-            binding.tvLockSubtitle.text = "Todos os apps bloqueados (exceto WhatsApp)"
-            binding.btnToggleLock.text = "DESBLOQUEAR (EXIGE PIN)"
-            binding.btnToggleLock.setBackgroundColor(ContextCompat.getColor(this, R.color.accent_red))
+            binding.tvLockSubtitle.text = if (blockedCount == 0) {
+                "Todos os apps bloqueados (exceto WhatsApp)"
+            } else {
+                "$blockedCount aplicativo(s) selecionado(s) bloqueado(s)"
+            }
+            binding.btnToggleLock.text = "DESBLOQUEAR (EXIGE SENHA MESTRE)"
+            binding.btnToggleLock.backgroundTintList =
+                ContextCompat.getColorStateList(this, R.color.accent_red)
         } else {
             binding.ivLockStatus.setImageResource(R.drawable.ic_focus_shield)
             binding.ivLockStatus.setColorFilter(ContextCompat.getColor(this, R.color.accent_green))
             binding.tvLockStatus.text = "STATUS: LIVRE"
             binding.tvLockStatus.setTextColor(ContextCompat.getColor(this, R.color.accent_green))
-            binding.tvLockSubtitle.text = "Todos os aplicativos liberados"
+            binding.tvLockSubtitle.text = "Todos os aplicativos estão liberados no momento"
             binding.btnToggleLock.text = "ATIVAR BLOQUEIO AGORA"
-            binding.btnToggleLock.setBackgroundColor(ContextCompat.getColor(this, R.color.accent_blue))
+            binding.btnToggleLock.backgroundTintList =
+                ContextCompat.getColorStateList(this, R.color.accent_blue)
         }
 
         val registered = prefs.registeredNfcTagId
@@ -332,23 +1035,35 @@ class MainActivity : AppCompatActivity() {
             binding.tvNfcInfo.text = "Nenhuma Tag NFC vinculada. Toque no botão abaixo e aproxime sua tag para cadastrar."
         }
 
-        val schedules = prefs.getSchedules()
-        if (schedules.isNotEmpty()) {
-            val s = schedules[0]
-            binding.tvScheduleName.text = String.format("Horário: %02d:%02d às %02d:%02d", s.startHour, s.startMinute, s.endHour, s.endMinute)
+        binding.tvBlockedAppsSummary.text = if (blockedCount == 0) {
+            "Apps bloqueados: Todos os apps (exceto WhatsApp)"
+        } else {
+            "Apps bloqueados: $blockedCount aplicativo(s) específico(s)"
         }
+
+        renderSchedulesList()
     }
 
-    private fun checkAccessibilityPermission() {
-        val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-        val enabledServices = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-        val isServiceEnabled = enabledServices.any { it.resolveInfo.serviceInfo.packageName == packageName }
+    private fun checkPermissionsStatus() {
+        val isAccessibilityEnabled = AppBlockerAccessibilityService.isServiceEnabled(this)
+        val isOverlayEnabled = Settings.canDrawOverlays(this)
 
-        if (isServiceEnabled) {
+        if (isAccessibilityEnabled && isOverlayEnabled) {
             binding.cardAccessibilityWarning.visibility = View.GONE
         } else {
             binding.cardAccessibilityWarning.visibility = View.VISIBLE
+            binding.btnEnableAccessibility.visibility = if (isAccessibilityEnabled) View.GONE else View.VISIBLE
+            binding.btnOpenAppDetails.visibility = if (isAccessibilityEnabled) View.GONE else View.VISIBLE
+            binding.btnEnableOverlay.visibility = if (isOverlayEnabled) View.GONE else View.VISIBLE
         }
+    }
+
+    private fun dpToPx(dp: Int): Int {
+        return TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            dp.toFloat(),
+            resources.displayMetrics
+        ).toInt()
     }
 
     private fun bytesToHex(bytes: ByteArray): String {
