@@ -43,17 +43,17 @@ jobs:
           name: FocusLock-Debug-APK
           path: app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Publish GitHub Release v3.2
+      - name: Publish GitHub Release v3.3
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if gh release view v3.2 >/dev/null 2>&1; then
-            gh release upload v3.2 FocusLock.apk --clobber
+          if gh release view v3.3 >/dev/null 2>&1; then
+            gh release upload v3.3 FocusLock.apk --clobber
           else
-            gh release create v3.2 FocusLock.apk \
-              --title "FocusLock v3.2 — Super App Edition (Filtro Minimalista Só com Contador + Correção da Gaveta de Apps)" \
-              --notes "FocusLock v3.2 APK assinado com a chave oficial (release.p12). Basta instalar por cima da versão atual ('Atualizar') sem desinstalar e sem perder nenhuma permissão ou configuração! Inclui: (1) Filtro de Notificações 100% minimalista mostrando apenas o total ('🔕 X notificações filtradas') sem exibir remetente, nome do app ou prévia; (2) Correção completa contra falsos bloqueios ao abrir a Gaveta/Lista de Aplicativos." \
+            gh release create v3.3 FocusLock.apk \
+              --title "FocusLock v3.3 — Ultra-Low Battery & Performance Edition (+ Botão Rápido na Barra do Android)" \
+              --notes "FocusLock v3.3 APK assinado com a chave oficial (release.p12) — atualiza direto por cima sem perder nenhuma permissão! Inclui: (1) Arquitetura Ultra-Low Battery com 0% de uso de CPU com a tela apagada (ACTION_SCREEN_OFF), cursor incremental de UsageEvents (-95% Binder IPC), caches em memória sem parsing JSON repetido e hibernação inteligente alinhada ao minuto; (2) Novo Botão Rápido (Quick Settings Tile) na barra do Android para iniciar Foco em 1 toque; (3) Pílula Flutuante arrastável para esquerda/direita e em toda a altura da tela + eliminação de contagem dupla de resumos de grupo (WhatsApp/Instagram); (4) APK otimizado e reduzido via R8." \
               --latest
           fi

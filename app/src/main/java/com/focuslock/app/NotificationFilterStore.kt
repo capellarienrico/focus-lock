@@ -113,7 +113,7 @@ class NotificationFilterStore private constructor(context: Context) {
                 existing.packageName == packageName &&
                         existing.title == cleanTitle &&
                         existing.text == cleanText &&
-                        kotlin.math.abs(timestamp - existing.timestamp) < 4000L
+                        kotlin.math.abs(timestamp - existing.timestamp) < 45_000L
             }
             if (duplicateIdx >= 0) {
                 if (contentIntent != null) {

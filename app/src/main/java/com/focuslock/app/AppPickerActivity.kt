@@ -41,7 +41,8 @@ class AppPickerActivity : AppCompatActivity() {
     private var pickerModeTag: String = ""
 
     private val bgExecutor = Executors.newSingleThreadExecutor()
-    private val iconCache = LruCache<String, Drawable>(120)
+    private val iconExecutor = Executors.newFixedThreadPool(2)
+    private val iconCache = LruCache<String, Drawable>(160)
     private lateinit var adapter: AppPickerAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -302,14 +303,28 @@ class AppPickerActivity : AppCompatActivity() {
         }
     }
 
-    private fun getCachedAppIcon(packageName: String): Drawable? {
-        iconCache.get(packageName)?.let { return it }
-        return try {
-            val icon = packageManager.getApplicationIcon(packageName)
-            iconCache.put(packageName, icon)
-            icon
-        } catch (_: Exception) {
-            ContextCompat.getDrawable(this, R.drawable.ic_focus_shield)
+    private fun bindAppIconAsync(imageView: android.widget.ImageView, packageName: String) {
+        imageView.tag = packageName
+        val cached = synchronized(iconCache) { iconCache.get(packageName) }
+        if (cached != null) {
+            imageView.setImageDrawable(cached)
+            return
+        }
+        imageView.setImageDrawable(ContextCompat.getDrawable(this, R.drawable.ic_focus_shield))
+        iconExecutor.execute {
+            val loaded = try {
+                packageManager.getApplicationIcon(packageName)
+            } catch (_: Exception) {
+                null
+            } ?: return@execute
+            synchronized(iconCache) {
+                iconCache.put(packageName, loaded)
+            }
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed && imageView.tag == packageName) {
+                    imageView.setImageDrawable(loaded)
+                }
+            }
         }
     }
 
@@ -323,6 +338,7 @@ class AppPickerActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         bgExecutor.shutdownNow()
+        iconExecutor.shutdownNow()
         super.onDestroy()
     }
 
@@ -352,7 +368,7 @@ class AppPickerActivity : AppCompatActivity() {
             val sizeStr = AppMetadataHelper.formatBytes(item.sizeBytes)
             b.tvAppMetrics.text = "⏱️ $todayStr hoje • $weekStr (7d)  •  💾 $sizeStr"
 
-            b.ivAppIcon.setImageDrawable(getCachedAppIcon(item.packageName))
+            bindAppIconAsync(b.ivAppIcon, item.packageName)
             b.cbAppSelected.isChecked = selectedPackages.contains(item.packageName)
 
             b.root.setOnClickListener {

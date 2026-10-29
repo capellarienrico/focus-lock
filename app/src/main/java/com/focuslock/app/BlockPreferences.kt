@@ -35,46 +35,62 @@ class BlockPreferences(private val appContext: Context) {
     private val prefs: SharedPreferences =
         appContext.getSharedPreferences("focus_lock_prefs", Context.MODE_PRIVATE)
 
+    // Caches em memória (0 alocações / 0 JSON parsing durante o loop de monitoramento)
+    @Volatile
+    private var cachedBlockedPackages: Set<String>? = null
+    @Volatile
+    private var cachedFilteredNotifPackages: Set<String>? = null
+    @Volatile
+    private var cachedTimeLimitedPackages: Set<String>? = null
+    @Volatile
+    private var cachedSchedules: List<BlockSchedule>? = null
+    @Volatile
+    private var cachedNfcTags: List<NfcTagProfile>? = null
+    @Volatile
+    private var cachedScheduleEvalMinute: Long = -1L
+    @Volatile
+    private var cachedAnyScheduleActive: Boolean = false
+
     var isMasterPasswordConfigured: Boolean
         get() = prefs.getBoolean(KEY_PASSWORD_CONFIGURED, false)
         set(value) {
-            prefs.edit().putBoolean(KEY_PASSWORD_CONFIGURED, value).commit()
+            prefs.edit().putBoolean(KEY_PASSWORD_CONFIGURED, value).apply()
         }
 
     var strictnessMode: String
         get() = prefs.getString(KEY_STRICTNESS_MODE, MODE_MINDFUL_DELAY) ?: MODE_MINDFUL_DELAY
         set(value) {
-            prefs.edit().putString(KEY_STRICTNESS_MODE, value).commit()
+            prefs.edit().putString(KEY_STRICTNESS_MODE, value).apply()
         }
 
     var isAntiTamperEnabled: Boolean
         get() = prefs.getBoolean(KEY_ANTI_TAMPER, false)
         set(value) {
-            prefs.edit().putBoolean(KEY_ANTI_TAMPER, value).commit()
+            prefs.edit().putBoolean(KEY_ANTI_TAMPER, value).apply()
         }
 
     var isBlockShortsReelsEnabled: Boolean
         get() = prefs.getBoolean(KEY_BLOCK_SHORTS_REELS, false)
         set(value) {
-            prefs.edit().putBoolean(KEY_BLOCK_SHORTS_REELS, value).commit()
+            prefs.edit().putBoolean(KEY_BLOCK_SHORTS_REELS, value).apply()
         }
 
     var isCognitiveChallengeEnabled: Boolean
         get() = prefs.getBoolean(KEY_COGNITIVE_CHALLENGE, false)
         set(value) {
-            prefs.edit().putBoolean(KEY_COGNITIVE_CHALLENGE, value).commit()
+            prefs.edit().putBoolean(KEY_COGNITIVE_CHALLENGE, value).apply()
         }
 
     var isMonkModeOnTimerEnabled: Boolean
         get() = prefs.getBoolean(KEY_MONK_MODE_TIMER, false)
         set(value) {
-            prefs.edit().putBoolean(KEY_MONK_MODE_TIMER, value).commit()
+            prefs.edit().putBoolean(KEY_MONK_MODE_TIMER, value).apply()
         }
 
     var customLockQuote: String
         get() = prefs.getString(KEY_CUSTOM_LOCK_QUOTE, DEFAULT_LOCK_QUOTE) ?: DEFAULT_LOCK_QUOTE
         set(value) {
-            prefs.edit().putString(KEY_CUSTOM_LOCK_QUOTE, value).commit()
+            prefs.edit().putString(KEY_CUSTOM_LOCK_QUOTE, value).apply()
         }
 
     // =========================================================================
@@ -84,23 +100,24 @@ class BlockPreferences(private val appContext: Context) {
     var timedFocusUntilMillis: Long
         get() = prefs.getLong(KEY_TIMED_FOCUS_UNTIL, 0L)
         set(value) {
-            prefs.edit().putLong(KEY_TIMED_FOCUS_UNTIL, value).commit()
+            prefs.edit().putLong(KEY_TIMED_FOCUS_UNTIL, value).apply()
         }
 
     var timedFocusDurationMinutes: Int
         get() = prefs.getInt(KEY_TIMED_FOCUS_DURATION_MINS, 25)
         set(value) {
-            prefs.edit().putInt(KEY_TIMED_FOCUS_DURATION_MINS, value).commit()
+            prefs.edit().putInt(KEY_TIMED_FOCUS_DURATION_MINS, value).apply()
         }
 
     fun startTimedFocusMinutes(minutes: Int) {
         val until = System.currentTimeMillis() + (minutes * 60_000L)
+        cachedScheduleEvalMinute = -1L
         prefs.edit()
             .putLong(KEY_TIMED_FOCUS_UNTIL, until)
             .putInt(KEY_TIMED_FOCUS_DURATION_MINS, minutes)
             .putLong(KEY_SCHEDULE_SNOOZE_UNTIL, 0L)
             .putLong(KEY_TIME_LIMIT_SNOOZE_UNTIL, 0L)
-            .commit()
+            .apply()
     }
 
     fun stopTimedFocus() {
@@ -122,19 +139,19 @@ class BlockPreferences(private val appContext: Context) {
     var isDailyTimeLimitEnabled: Boolean
         get() = prefs.getBoolean(KEY_DAILY_TIME_LIMIT_ENABLED, false)
         set(value) {
-            prefs.edit().putBoolean(KEY_DAILY_TIME_LIMIT_ENABLED, value).commit()
+            prefs.edit().putBoolean(KEY_DAILY_TIME_LIMIT_ENABLED, value).apply()
         }
 
     var dailyTimeLimitMinutes: Int
         get() = prefs.getInt(KEY_DAILY_TIME_LIMIT_MINUTES, 30)
         set(value) {
-            prefs.edit().putInt(KEY_DAILY_TIME_LIMIT_MINUTES, value).commit()
+            prefs.edit().putInt(KEY_DAILY_TIME_LIMIT_MINUTES, value).apply()
         }
 
     var timeLimitSnoozeUntilMillis: Long
         get() = prefs.getLong(KEY_TIME_LIMIT_SNOOZE_UNTIL, 0L)
         set(value) {
-            prefs.edit().putLong(KEY_TIME_LIMIT_SNOOZE_UNTIL, value).commit()
+            prefs.edit().putLong(KEY_TIME_LIMIT_SNOOZE_UNTIL, value).apply()
         }
 
     fun snoozeTimeLimitForMinutes(minutes: Int) {
@@ -146,11 +163,16 @@ class BlockPreferences(private val appContext: Context) {
     }
 
     fun getTimeLimitedPackages(): Set<String> {
-        return readStringSetJson(KEY_TIME_LIMITED_PACKAGES_JSON)
+        cachedTimeLimitedPackages?.let { return it }
+        return readStringSetJson(KEY_TIME_LIMITED_PACKAGES_JSON).also {
+            cachedTimeLimitedPackages = it
+        }
     }
 
     fun saveTimeLimitedPackages(packages: Set<String>) {
-        writeStringSetJson(KEY_TIME_LIMITED_PACKAGES_JSON, packages)
+        val copy = packages.toSet()
+        cachedTimeLimitedPackages = copy
+        writeStringSetJson(KEY_TIME_LIMITED_PACKAGES_JSON, copy)
     }
 
     // =========================================================================
@@ -160,33 +182,44 @@ class BlockPreferences(private val appContext: Context) {
     var isNotificationFilterEnabled: Boolean
         get() = prefs.getBoolean(KEY_NOTIF_FILTER_ENABLED, false)
         set(value) {
-            prefs.edit().putBoolean(KEY_NOTIF_FILTER_ENABLED, value).commit()
+            prefs.edit().putBoolean(KEY_NOTIF_FILTER_ENABLED, value).apply()
         }
 
     var notificationFilterMode: String
         get() = prefs.getString(KEY_NOTIF_FILTER_MODE, NOTIF_MODE_ALWAYS) ?: NOTIF_MODE_ALWAYS
         set(value) {
-            prefs.edit().putString(KEY_NOTIF_FILTER_MODE, value).commit()
+            prefs.edit().putString(KEY_NOTIF_FILTER_MODE, value).apply()
         }
 
     var floatingPillMode: String
         get() = prefs.getString(KEY_FLOATING_PILL_MODE, PILL_MODE_HOME_ONLY) ?: PILL_MODE_HOME_ONLY
         set(value) {
-            prefs.edit().putString(KEY_FLOATING_PILL_MODE, value).commit()
+            prefs.edit().putString(KEY_FLOATING_PILL_MODE, value).apply()
         }
 
     var floatingPillYOffsetPx: Int
         get() = prefs.getInt(KEY_FLOATING_PILL_Y_OFFSET, 240)
         set(value) {
-            prefs.edit().putInt(KEY_FLOATING_PILL_Y_OFFSET, value).commit()
+            prefs.edit().putInt(KEY_FLOATING_PILL_Y_OFFSET, value).apply()
+        }
+
+    var floatingPillAlignLeft: Boolean
+        get() = prefs.getBoolean(KEY_FLOATING_PILL_ALIGN_LEFT, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_FLOATING_PILL_ALIGN_LEFT, value).apply()
         }
 
     fun getFilteredNotificationPackages(): Set<String> {
-        return readStringSetJson(KEY_FILTERED_NOTIF_PACKAGES_JSON)
+        cachedFilteredNotifPackages?.let { return it }
+        return readStringSetJson(KEY_FILTERED_NOTIF_PACKAGES_JSON).also {
+            cachedFilteredNotifPackages = it
+        }
     }
 
     fun saveFilteredNotificationPackages(packages: Set<String>) {
-        writeStringSetJson(KEY_FILTERED_NOTIF_PACKAGES_JSON, packages)
+        val copy = packages.toSet()
+        cachedFilteredNotifPackages = copy
+        writeStringSetJson(KEY_FILTERED_NOTIF_PACKAGES_JSON, copy)
     }
 
     fun shouldFilterNotificationsNow(): Boolean {
@@ -205,19 +238,19 @@ class BlockPreferences(private val appContext: Context) {
     var isDailyBudgetEnabled: Boolean
         get() = prefs.getBoolean(KEY_DAILY_BUDGET_ENABLED, false)
         set(value) {
-            prefs.edit().putBoolean(KEY_DAILY_BUDGET_ENABLED, value).commit()
+            prefs.edit().putBoolean(KEY_DAILY_BUDGET_ENABLED, value).apply()
         }
 
     var dailyMaxOpens: Int
         get() = prefs.getInt(KEY_DAILY_MAX_OPENS, 5)
         set(value) {
-            prefs.edit().putInt(KEY_DAILY_MAX_OPENS, value).commit()
+            prefs.edit().putInt(KEY_DAILY_MAX_OPENS, value).apply()
         }
 
     var dailySessionMinutes: Int
         get() = prefs.getInt(KEY_DAILY_SESSION_MINUTES, 5)
         set(value) {
-            prefs.edit().putInt(KEY_DAILY_SESSION_MINUTES, value).commit()
+            prefs.edit().putInt(KEY_DAILY_SESSION_MINUTES, value).apply()
         }
 
     fun getDailyOpensUsedToday(): Int {
@@ -234,7 +267,7 @@ class BlockPreferences(private val appContext: Context) {
         prefs.edit()
             .putString(KEY_DAILY_OPENS_DATE, today)
             .putInt(KEY_DAILY_OPENS_USED, current + 1)
-            .commit()
+            .apply()
     }
 
     fun isDailyBudgetExhausted(): Boolean {
@@ -262,7 +295,7 @@ class BlockPreferences(private val appContext: Context) {
         prefs.edit()
             .putString(KEY_STATS_DATE, today)
             .putInt(KEY_BLOCKED_ATTEMPTS_TODAY, currentCount + 1)
-            .commit()
+            .apply()
     }
 
     private fun currentDateKey(): String {
@@ -274,16 +307,18 @@ class BlockPreferences(private val appContext: Context) {
         set(value) {
             val editor = prefs.edit().putBoolean(KEY_MANUAL_LOCK, value)
             if (value) {
+                cachedScheduleEvalMinute = -1L
                 editor.putLong(KEY_SCHEDULE_SNOOZE_UNTIL, 0L)
                 editor.putLong(KEY_TIME_LIMIT_SNOOZE_UNTIL, 0L)
             }
-            editor.commit()
+            editor.apply()
         }
 
     var scheduleSnoozeUntilMillis: Long
         get() = prefs.getLong(KEY_SCHEDULE_SNOOZE_UNTIL, 0L)
         set(value) {
-            prefs.edit().putLong(KEY_SCHEDULE_SNOOZE_UNTIL, value).commit()
+            cachedScheduleEvalMinute = -1L
+            prefs.edit().putLong(KEY_SCHEDULE_SNOOZE_UNTIL, value).apply()
         }
 
     fun snoozeSchedulesForMinutes(minutes: Int) {
@@ -305,9 +340,10 @@ class BlockPreferences(private val appContext: Context) {
         }
 
     fun getNfcTags(): MutableList<NfcTagProfile> {
+        cachedNfcTags?.let { return it.toMutableList() }
         val jsonStr = prefs.getString(KEY_NFC_TAGS_JSON, null)
-        if (jsonStr != null) {
-            return try {
+        val loaded: List<NfcTagProfile> = if (jsonStr != null) {
+            try {
                 val arr = JSONArray(jsonStr)
                 val list = mutableListOf<NfcTagProfile>()
                 for (i in 0 until arr.length()) {
@@ -316,33 +352,39 @@ class BlockPreferences(private val appContext: Context) {
                 }
                 list
             } catch (_: Exception) {
-                mutableListOf()
+                emptyList()
+            }
+        } else {
+            val legacy = prefs.getString(KEY_NFC_TAG, null)
+            if (!legacy.isNullOrBlank()) {
+                listOf(NfcTagProfile(uid = legacy, name = "Tag de Casa"))
+            } else {
+                emptyList()
             }
         }
-        val legacy = prefs.getString(KEY_NFC_TAG, null)
-        return if (!legacy.isNullOrBlank()) {
-            mutableListOf(NfcTagProfile(uid = legacy, name = "Tag de Casa"))
-        } else {
-            mutableListOf()
-        }
+        cachedNfcTags = loaded
+        return loaded.toMutableList()
     }
 
     fun saveNfcTags(tags: List<NfcTagProfile>) {
+        val copy = tags.toList()
+        cachedNfcTags = copy
         val arr = JSONArray()
-        tags.forEach { arr.put(it.toJson()) }
+        copy.forEach { arr.put(it.toJson()) }
         prefs.edit()
             .putString(KEY_NFC_TAGS_JSON, arr.toString())
             .remove(KEY_NFC_TAG)
-            .commit()
+            .apply()
     }
 
     fun isNfcTagAllowed(uid: String): Boolean {
-        val tags = getNfcTags()
+        val tags = cachedNfcTags ?: getNfcTags()
         return tags.isEmpty() || tags.any { it.uid.equals(uid, ignoreCase = true) }
     }
 
     fun findNfcTagName(uid: String): String? {
-        return getNfcTags().firstOrNull { it.uid.equals(uid, ignoreCase = true) }?.name
+        val tags = cachedNfcTags ?: getNfcTags()
+        return tags.firstOrNull { it.uid.equals(uid, ignoreCase = true) }?.name
     }
 
     var masterPin: String
@@ -351,27 +393,46 @@ class BlockPreferences(private val appContext: Context) {
             prefs.edit()
                 .putString(KEY_MASTER_PIN, value)
                 .putBoolean(KEY_PASSWORD_CONFIGURED, true)
-                .commit()
+                .apply()
         }
 
     fun getSchedules(): MutableList<BlockSchedule> {
+        cachedSchedules?.let { return it.toMutableList() }
+        val loaded = loadSchedulesFromDisk()
+        cachedSchedules = loaded
+        return loaded.toMutableList()
+    }
+
+    private fun getSchedulesCachedReadOnly(): List<BlockSchedule> {
+        cachedSchedules?.let { return it }
+        return loadSchedulesFromDisk().also { cachedSchedules = it }
+    }
+
+    private fun loadSchedulesFromDisk(): List<BlockSchedule> {
         val jsonStr = prefs.getString(KEY_SCHEDULES, null) ?: return defaultSchedules()
         return try {
             val arr = JSONArray(jsonStr)
-            val list = mutableListOf<BlockSchedule>()
+            val list = ArrayList<BlockSchedule>(arr.length())
             for (i in 0 until arr.length()) {
                 list.add(BlockSchedule.fromJson(arr.getJSONObject(i)))
             }
             list
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             defaultSchedules()
         }
     }
 
     fun saveSchedules(schedules: List<BlockSchedule>) {
+        val copy = schedules.toList()
+        cachedSchedules = copy
+        cachedScheduleEvalMinute = -1L
         val arr = JSONArray()
-        schedules.forEach { arr.put(it.toJson()) }
-        prefs.edit().putString(KEY_SCHEDULES, arr.toString()).commit()
+        copy.forEach { arr.put(it.toJson()) }
+        prefs.edit().putString(KEY_SCHEDULES, arr.toString()).apply()
+    }
+
+    fun hasAnyEnabledSchedule(): Boolean {
+        return getSchedulesCachedReadOnly().any { it.isEnabled }
     }
 
     private fun defaultSchedules(): MutableList<BlockSchedule> {
@@ -390,27 +451,33 @@ class BlockPreferences(private val appContext: Context) {
     }
 
     fun getBlockedPackages(): Set<String> {
+        cachedBlockedPackages?.let { return it }
         val jsonStr = prefs.getString(KEY_BLOCKED_PACKAGES_JSON, null)
-        if (jsonStr != null) {
-            return readStringSetJson(KEY_BLOCKED_PACKAGES_JSON)
+        val loaded = if (jsonStr != null) {
+            readStringSetJson(KEY_BLOCKED_PACKAGES_JSON)
+        } else {
+            prefs.getStringSet(KEY_BLOCKED_PACKAGES, emptySet())?.toSet() ?: emptySet()
         }
-        return prefs.getStringSet(KEY_BLOCKED_PACKAGES, emptySet())?.toSet() ?: emptySet()
+        cachedBlockedPackages = loaded
+        return loaded
     }
 
     fun saveBlockedPackages(packages: Set<String>) {
+        val copy = packages.toSet()
+        cachedBlockedPackages = copy
         val arr = JSONArray()
-        packages.forEach { arr.put(it) }
+        copy.forEach { arr.put(it) }
         prefs.edit()
             .putString(KEY_BLOCKED_PACKAGES_JSON, arr.toString())
             .remove(KEY_BLOCKED_PACKAGES)
-            .commit()
+            .apply()
     }
 
     private fun readStringSetJson(key: String): Set<String> {
         val jsonStr = prefs.getString(key, null) ?: return emptySet()
         return try {
             val arr = JSONArray(jsonStr)
-            val set = mutableSetOf<String>()
+            val set = HashSet<String>(arr.length())
             for (i in 0 until arr.length()) {
                 val pkg = arr.optString(i)
                 if (pkg.isNotBlank()) set.add(pkg)
@@ -424,12 +491,22 @@ class BlockPreferences(private val appContext: Context) {
     private fun writeStringSetJson(key: String, values: Set<String>) {
         val arr = JSONArray()
         values.forEach { arr.put(it) }
-        prefs.edit().putString(key, arr.toString()).commit()
+        prefs.edit().putString(key, arr.toString()).apply()
     }
 
     fun isAnyScheduleActiveNow(): Boolean {
         if (isScheduleSnoozed()) return false
-        return getSchedules().any { it.isActiveNow() }
+        val schedules = getSchedulesCachedReadOnly()
+        if (schedules.none { it.isEnabled }) return false
+
+        val currentEpochMinute = System.currentTimeMillis() / 60_000L
+        if (currentEpochMinute == cachedScheduleEvalMinute) {
+            return cachedAnyScheduleActive
+        }
+        val active = schedules.any { it.isActiveNow() }
+        cachedAnyScheduleActive = active
+        cachedScheduleEvalMinute = currentEpochMinute
+        return active
     }
 
     fun isBlockingCurrentlyActive(): Boolean {
@@ -457,9 +534,10 @@ class BlockPreferences(private val appContext: Context) {
         }
 
         // 3. Verificação de Agendamentos / Blocos de Horário ativos (com suporte a lista por horário)
-        if (!isScheduleSnoozed()) {
-            val activeSchedules = getSchedules().filter { it.isActiveNow() }
-            for (schedule in activeSchedules) {
+        if (isAnyScheduleActiveNow()) {
+            val schedules = getSchedulesCachedReadOnly()
+            for (schedule in schedules) {
+                if (!schedule.isActiveNow()) continue
                 val scheduleApps = schedule.customBlockedPackages
                 val isBlockedByThisSchedule = if (scheduleApps.isNotEmpty()) {
                     scheduleApps.contains(packageName)
@@ -775,6 +853,7 @@ class BlockPreferences(private val appContext: Context) {
         private const val KEY_NOTIF_FILTER_MODE = "notif_filter_mode"
         private const val KEY_FLOATING_PILL_MODE = "floating_pill_mode"
         private const val KEY_FLOATING_PILL_Y_OFFSET = "floating_pill_y_offset"
+        private const val KEY_FLOATING_PILL_ALIGN_LEFT = "floating_pill_align_left"
         private const val KEY_FILTERED_NOTIF_PACKAGES_JSON = "filtered_notif_packages_json"
         private const val KEY_DAILY_BUDGET_ENABLED = "daily_budget_enabled"
         private const val KEY_DAILY_MAX_OPENS = "daily_max_opens"

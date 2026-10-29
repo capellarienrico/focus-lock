@@ -11,8 +11,8 @@ android {
         applicationId = "com.focuslock.zen"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "3.2"
+        versionCode = 7
+        versionName = "3.3"
     }
 
     signingConfigs {
@@ -30,7 +30,8 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             isDebuggable = false
             val ksFile = file("release.p12")
             signingConfig = if (ksFile.exists()) {

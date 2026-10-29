@@ -66,10 +66,10 @@ class FloatingFilterPillController(
             return
         }
 
-        showAndAttach(label, prefs.floatingPillYOffsetPx)
+        showAndAttach(label, prefs.floatingPillYOffsetPx, prefs.floatingPillAlignLeft)
     }
 
-    private fun showAndAttach(label: String, initialYOffset: Int) {
+    private fun showAndAttach(label: String, initialYOffset: Int, alignLeft: Boolean) {
         try {
             val wm = serviceContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
             windowManager = wm
@@ -99,6 +99,9 @@ class FloatingFilterPillController(
                 addView(tv)
             }
 
+            val screenH = serviceContext.resources.displayMetrics.heightPixels.coerceAtLeast(dpToPx(640))
+            val maxY = (screenH - dpToPx(96)).coerceAtLeast(dpToPx(120))
+
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -107,9 +110,9 @@ class FloatingFilterPillController(
                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT
             ).apply {
-                gravity = Gravity.TOP or Gravity.END
+                gravity = Gravity.TOP or if (alignLeft) Gravity.START else Gravity.END
                 x = dpToPx(14)
-                y = initialYOffset.coerceAtLeast(dpToPx(64))
+                y = initialYOffset.coerceIn(dpToPx(56), maxY)
                 title = "FocusLockFilteredPill"
             }
             layoutParams = params
@@ -134,6 +137,11 @@ class FloatingFilterPillController(
         val slopPx = dpToPx(8)
 
         view.setOnTouchListener { _, event ->
+            val metrics = serviceContext.resources.displayMetrics
+            val screenW = metrics.widthPixels.coerceAtLeast(dpToPx(320))
+            val screenH = metrics.heightPixels.coerceAtLeast(dpToPx(640))
+            val maxY = (screenH - dpToPx(96)).coerceAtLeast(dpToPx(120))
+
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialY = params.y
@@ -149,7 +157,10 @@ class FloatingFilterPillController(
                         moved = true
                     }
                     if (moved) {
-                        params.y = (initialY + dy).coerceIn(dpToPx(48), dpToPx(720))
+                        params.y = (initialY + dy).coerceIn(dpToPx(48), maxY)
+                        val isLeftHalf = event.rawX < (screenW / 2f)
+                        params.gravity = Gravity.TOP or if (isLeftHalf) Gravity.START else Gravity.END
+                        params.x = dpToPx(14)
                         try {
                             windowManager?.updateViewLayout(view, params)
                         } catch (_: Exception) {
@@ -159,7 +170,9 @@ class FloatingFilterPillController(
                 }
                 MotionEvent.ACTION_UP -> {
                     if (moved) {
-                        prefsProvider().floatingPillYOffsetPx = params.y
+                        val prefs = prefsProvider()
+                        prefs.floatingPillYOffsetPx = params.y
+                        prefs.floatingPillAlignLeft = event.rawX < (screenW / 2f)
                     } else {
                         openFilteredInbox()
                     }

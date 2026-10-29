@@ -59,6 +59,14 @@ class FocusNotificationListenerService : NotificationListenerService() {
             val filteredPkgs = prefs.getFilteredNotificationPackages()
             if (!filteredPkgs.contains(pkg)) return
 
+            // Ignora notificações-resumo de grupo (FLAG_GROUP_SUMMARY) como "WhatsApp: 3 novas mensagens",
+            // evitando contar em dobro cada mensagem individual que chega!
+            val isGroupSummary = (notif.flags and Notification.FLAG_GROUP_SUMMARY) != 0
+            if (isGroupSummary) {
+                cancelNotification(sbn.key)
+                return
+            }
+
             val extras = notif.extras
             val title = extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim()
                 ?: extras?.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()?.trim()
@@ -74,12 +82,6 @@ class FocusNotificationListenerService : NotificationListenerService() {
                 !normalText.isNullOrBlank() -> normalText
                 !textLines.isNullOrBlank() -> textLines
                 else -> ""
-            }
-
-            val isGroupSummary = (notif.flags and Notification.FLAG_GROUP_SUMMARY) != 0
-            if (isGroupSummary && (title.isBlank() || body.isBlank())) {
-                cancelNotification(sbn.key)
-                return
             }
 
             val appName = try {

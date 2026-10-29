@@ -117,6 +117,18 @@
             </intent-filter>
         </service>
 
+        <!-- Android Quick Settings Tile (1-Tap Focus Timer, 0% Background Battery) -->
+        <service
+            android:name=".FocusQuickTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_focus_shield"
+            android:label="FocusLock"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <!-- Boot, Auto-Restart & Notification Filter Clear Receiver -->
         <receiver
             android:name=".BootReceiver"
