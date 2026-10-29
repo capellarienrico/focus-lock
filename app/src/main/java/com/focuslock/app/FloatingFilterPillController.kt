@@ -175,24 +175,24 @@ class FloatingFilterPillController(
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         try {
-            val pi = PendingIntent.getActivity(
-                serviceContext,
-                2105,
-                intent,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            )
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                val options = ActivityOptions.makeBasic()
-                    .setPendingIntentBackgroundActivityStartMode(
-                        ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
-                    )
-                pi.send(serviceContext, 0, null, null, null, null, options.toBundle())
-            } else {
-                pi.send()
-            }
+            serviceContext.startActivity(intent)
         } catch (_: Exception) {
             try {
-                serviceContext.startActivity(intent)
+                val pi = PendingIntent.getActivity(
+                    serviceContext,
+                    2105,
+                    intent,
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    val options = ActivityOptions.makeBasic()
+                        .setPendingIntentBackgroundActivityStartMode(
+                            ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                        )
+                    pi.send(serviceContext, 0, null, null, null, null, options.toBundle())
+                } else {
+                    pi.send()
+                }
             } catch (_: Exception) {
             }
         }

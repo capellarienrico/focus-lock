@@ -43,17 +43,17 @@ jobs:
           name: FocusLock-Debug-APK
           path: app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Publish GitHub Release v3.1
+      - name: Publish GitHub Release v3.2
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if gh release view v3.1 >/dev/null 2>&1; then
-            gh release upload v3.1 FocusLock.apk --clobber
+          if gh release view v3.2 >/dev/null 2>&1; then
+            gh release upload v3.2 FocusLock.apk --clobber
           else
-            gh release create v3.1 FocusLock.apk \
-              --title "FocusLock v3.1 — Super App Edition (Correção de Falso Bloqueio na Gaveta/Lista de Apps)" \
-              --notes "FocusLock v3.1 APK assinado com a mesma chave da v3.0 (atualiza por cima sem perder dados!). Corrige falsos bloqueios ao abrir a Gaveta/Lista de Aplicativos da Tela Inicial, Lista de Apps das Configurações ou Seletor Interno de Apps, eliminando ressurreição de eventos antigos pós-Home, respeitando ACTIVITY_PAUSED e liberando buscas de gaveta (Samsung Finder, Xiaomi/POCO Drawer, launchers minimalistas)." \
+            gh release create v3.2 FocusLock.apk \
+              --title "FocusLock v3.2 — Super App Edition (Filtro Minimalista Só com Contador + Correção da Gaveta de Apps)" \
+              --notes "FocusLock v3.2 APK assinado com a chave oficial (release.p12). Basta instalar por cima da versão atual ('Atualizar') sem desinstalar e sem perder nenhuma permissão ou configuração! Inclui: (1) Filtro de Notificações 100% minimalista mostrando apenas o total ('🔕 X notificações filtradas') sem exibir remetente, nome do app ou prévia; (2) Correção completa contra falsos bloqueios ao abrir a Gaveta/Lista de Aplicativos." \
               --latest
           fi

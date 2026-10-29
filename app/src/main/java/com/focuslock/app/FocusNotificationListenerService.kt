@@ -161,14 +161,7 @@ class FocusNotificationListenerService : NotificationListenerService() {
             } else {
                 "🔕 $count notificações filtradas"
             }
-
-            val groupedByApp = items.groupingBy { it.appName }.eachCount()
-                .entries
-                .sortedByDescending { it.value }
-            val appsSummary = groupedByApp.take(4)
-                .joinToString(", ") { "${it.key} (${it.value})" }
-            val moreSuffix = if (groupedByApp.size > 4) " +${groupedByApp.size - 4}" else ""
-            val subtitle = "$appsSummary$moreSuffix • Toque para abrir"
+            val subtitle = "Toque para revisar quando quiser"
 
             val inboxIntent = Intent(appCtx, FilteredNotificationsActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -190,33 +183,21 @@ class FocusNotificationListenerService : NotificationListenerService() {
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
 
-            val inboxStyle = NotificationCompat.InboxStyle()
-                .setBigContentTitle(title)
-            items.take(5).forEach { item ->
-                val preview = if (item.text.isNotBlank()) {
-                    "${item.appName}: ${item.title} — ${item.text}"
-                } else {
-                    "${item.appName}: ${item.title}"
-                }
-                inboxStyle.addLine(preview)
-            }
-            if (count > 5) {
-                inboxStyle.setSummaryText("+${count - 5} outras na caixa filtrada")
-            }
-
+            // Privacidade & Minimalismo: exibe APENAS o total de notificações filtradas,
+            // sem mostrar remetente, nome do app nem prévia da mensagem na barra de notificações.
             val notification = NotificationCompat.Builder(appCtx, SUMMARY_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_focus_shield)
                 .setContentTitle(title)
                 .setContentText(subtitle)
-                .setStyle(inboxStyle)
                 .setNumber(count)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setSilent(true)
                 .setOngoing(false)
                 .setAutoCancel(false)
                 .setOnlyAlertOnce(true)
                 .setContentIntent(openPi)
-                .addAction(0, "Abrir Caixa ($count)", openPi)
+                .addAction(0, "Abrir ($count)", openPi)
                 .addAction(0, "Limpar Tudo", clearPi)
                 .build()
 

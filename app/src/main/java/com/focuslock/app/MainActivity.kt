@@ -1206,42 +1206,22 @@ class MainActivity : AppCompatActivity() {
             }
             binding.llRecentFilteredContainer.addView(emptyTv)
         } else {
-            activeFilteredItems.take(5).forEachIndexed { idx, item ->
-                val itemView = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setBackgroundColor(Color.parseColor("#0F111A"))
-                    val pad = dpToPx(10)
-                    setPadding(pad, dpToPx(8), pad, dpToPx(8))
-                    layoutParams = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                    ).apply {
-                        if (idx > 0) topMargin = dpToPx(6)
-                    }
-                    setOnClickListener {
-                        startActivity(Intent(this@MainActivity, FilteredNotificationsActivity::class.java))
-                    }
+            val totalOnlyTv = TextView(this).apply {
+                text = if (count == 1) {
+                    "🔕 1 notificação filtrada (remetente oculto). Toque em \"Abrir Caixa Filtrada\" acima quando quiser ver."
+                } else {
+                    "🔕 $count notificações filtradas (remetentes ocultos). Toque em \"Abrir Caixa Filtrada\" acima quando quiser ver."
                 }
-
-                val clock = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
-                val topLine = TextView(this).apply {
-                    text = "${item.appName} • $clock"
-                    setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accent_blue))
-                    textSize = 11f
-                    setTypeface(typeface, Typeface.BOLD)
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+                textSize = 13f
+                val pad = dpToPx(10)
+                setPadding(pad, dpToPx(8), pad, dpToPx(8))
+                setBackgroundColor(Color.parseColor("#0F111A"))
+                setOnClickListener {
+                    startActivity(Intent(this@MainActivity, FilteredNotificationsActivity::class.java))
                 }
-                val bodyLine = TextView(this).apply {
-                    val summary = if (item.text.isNotBlank()) "${item.title}: ${item.text}" else item.title
-                    text = summary
-                    setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
-                    textSize = 12.5f
-                    maxLines = 2
-                    ellipsize = TextUtils.TruncateAt.END
-                }
-                itemView.addView(topLine)
-                itemView.addView(bodyLine)
-                binding.llRecentFilteredContainer.addView(itemView)
             }
+            binding.llRecentFilteredContainer.addView(totalOnlyTv)
         }
     }
 
