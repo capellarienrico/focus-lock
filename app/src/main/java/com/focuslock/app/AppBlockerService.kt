@@ -38,9 +38,10 @@ class AppBlockerService : Service() {
 
     private var lastBlockedTime = 0L
     private var lastStatRecordedTime = 0L
-    private var ignoreEventsBeforeTimestamp = 0L
+    private var minEventTimestamp = 0L
     private var currentForegroundPackage = ""
     private var currentForegroundClass = ""
+    private var wasSelfInForeground = false
     private var wasBlockingActive = false
     private var wasTimedFocusActive = false
 
@@ -292,7 +293,9 @@ class AppBlockerService : Service() {
 
     private fun updateFloatingPillForCurrentState(activePkg: String = currentForegroundPackage) {
         val pill = floatingPill ?: return
-        if (isLockUiShowing() || FilteredNotificationsActivity.isResumed) {
+        val isInsideSecondaryFocusLockScreen =
+            FocusLockApp.isNonLockActivityInForeground && !MainActivity.isResumed
+        if (isLockUiShowing() || FilteredNotificationsActivity.isResumed || isInsideSecondaryFocusLockScreen) {
             pill.hide()
             return
         }
@@ -303,61 +306,79 @@ class AppBlockerService : Service() {
     }
 
     private fun queryForegroundPackageAndClass(lookbackMs: Long): Pair<String, String> {
+        // Se qualquer tela do próprio FocusLock (MainActivity, AppPickerActivity, Caixa Filtrada) está aberta,
+        // sabemos deterministicamente que o usuário está dentro do FocusLock.
+        if (FocusLockApp.isNonLockActivityInForeground) {
+            wasSelfInForeground = true
+            currentForegroundPackage = this.packageName
+            currentForegroundClass = ""
+            return currentForegroundPackage to currentForegroundClass
+        } else if (wasSelfInForeground) {
+            wasSelfInForeground = false
+            if (currentForegroundPackage == this.packageName) {
+                currentForegroundPackage = ""
+                currentForegroundClass = ""
+            }
+        }
+
         val usm = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
             ?: return currentForegroundPackage to currentForegroundClass
 
         val now = System.currentTimeMillis()
-
-        if (ignoreEventsBeforeTimestamp > 0L && now - ignoreEventsBeforeTimestamp > 1600L) {
-            ignoreEventsBeforeTimestamp = 0L
+        val startQueryTime = maxOf(now - lookbackMs, minEventTimestamp)
+        if (startQueryTime >= now) {
+            return currentForegroundPackage to currentForegroundClass
         }
 
-        val startQueryTime = maxOf(now - lookbackMs, ignoreEventsBeforeTimestamp)
         val events = usm.queryEvents(startQueryTime, now)
         val event = UsageEvents.Event()
-        var latestPkg: String? = null
-        var latestClass: String? = null
-        var latestTime = 0L
+        var activePkg: String? = null
+        var activeClass = ""
+        var activeTime = 0L
+        var sawCurrentPkgPaused = false
 
         while (events != null && events.hasNextEvent()) {
             events.getNextEvent(event)
-            if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED ||
-                event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND
-            ) {
-                if (event.timeStamp >= ignoreEventsBeforeTimestamp && event.timeStamp >= latestTime) {
-                    latestTime = event.timeStamp
-                    latestPkg = event.packageName
-                    latestClass = event.className ?: ""
+            val ts = event.timeStamp
+            if (ts < minEventTimestamp) continue
+
+            val evPkg = event.packageName ?: continue
+            val evCls = event.className ?: ""
+
+            when (event.eventType) {
+                UsageEvents.Event.ACTIVITY_RESUMED -> {
+                    if (ts >= activeTime) {
+                        activeTime = ts
+                        activePkg = evPkg
+                        activeClass = evCls
+                    }
+                    if (evPkg == currentForegroundPackage) {
+                        sawCurrentPkgPaused = false
+                    }
+                }
+                UsageEvents.Event.ACTIVITY_PAUSED -> {
+                    if (evPkg == activePkg &&
+                        (activeClass.isEmpty() || evCls.isEmpty() || evCls == activeClass) &&
+                        ts >= activeTime
+                    ) {
+                        activePkg = null
+                        activeClass = ""
+                    }
+                    if (evPkg == currentForegroundPackage &&
+                        (currentForegroundClass.isEmpty() || evCls.isEmpty() || evCls == currentForegroundClass)
+                    ) {
+                        sawCurrentPkgPaused = true
+                    }
                 }
             }
         }
 
-        if (!latestPkg.isNullOrBlank()) {
-            currentForegroundPackage = latestPkg
-            currentForegroundClass = latestClass ?: ""
-            if (ignoreEventsBeforeTimestamp > 0L && latestPkg != this.packageName) {
-                ignoreEventsBeforeTimestamp = 0L
-            }
-        } else if (ignoreEventsBeforeTimestamp == 0L) {
-            val isSelfActuallyInForeground = MainActivity.isResumed ||
-                    LockActivity.isShowing ||
-                    FilteredNotificationsActivity.isResumed
-            if (currentForegroundPackage.isBlank() ||
-                (currentForegroundPackage == this.packageName && !isSelfActuallyInForeground)
-            ) {
-                val stats = usm.queryUsageStats(
-                    UsageStatsManager.INTERVAL_DAILY,
-                    now - 14_400_000L,
-                    now
-                )
-                val mostRecent = stats
-                    ?.filter { !it.packageName.isNullOrBlank() && (isSelfActuallyInForeground || it.packageName != this.packageName) }
-                    ?.maxByOrNull { it.lastTimeUsed }
-                if (mostRecent != null) {
-                    currentForegroundPackage = mostRecent.packageName
-                    currentForegroundClass = ""
-                }
-            }
+        if (!activePkg.isNullOrBlank()) {
+            currentForegroundPackage = activePkg
+            currentForegroundClass = activeClass
+        } else if (sawCurrentPkgPaused) {
+            currentForegroundPackage = ""
+            currentForegroundClass = ""
         }
 
         return currentForegroundPackage to currentForegroundClass
@@ -416,7 +437,6 @@ class AppBlockerService : Service() {
         val tamperClasses = listOf(
             "installedappdetails",
             "applicationdetails",
-            "appmanage",
             "usageaccess",
             "drawoverlay",
             "uninstaller"
@@ -442,21 +462,22 @@ class AppBlockerService : Service() {
             putExtra("BLOCKED_PACKAGE", blockedPkgOrReason)
         }
 
+        // Com SYSTEM_ALERT_WINDOW ativa, startActivity direto tem isenção oficial de BAL no Android 10–16
         try {
-            val piFlags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            val pi = PendingIntent.getActivity(this, 2001, lockIntent, piFlags)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                val options = ActivityOptions.makeBasic()
-                    .setPendingIntentBackgroundActivityStartMode(
-                        ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
-                    )
-                pi.send(this, 0, null, null, null, null, options.toBundle())
-            } else {
-                pi.send()
-            }
+            startActivity(lockIntent)
         } catch (_: Exception) {
             try {
-                startActivity(lockIntent)
+                val piFlags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                val pi = PendingIntent.getActivity(this, 2001, lockIntent, piFlags)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    val options = ActivityOptions.makeBasic()
+                        .setPendingIntentBackgroundActivityStartMode(
+                            ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                        )
+                    pi.send(this, 0, null, null, null, null, options.toBundle())
+                } else {
+                    pi.send()
+                }
             } catch (e: Exception) {
                 Log.w("AppBlockerService", "LockActivity bloqueada por BAL; mantendo LockOverlay ativo", e)
             }
@@ -541,6 +562,10 @@ class AppBlockerService : Service() {
 
         fun onUnlocked() {
             instance?.let { svc ->
+                val now = System.currentTimeMillis()
+                svc.minEventTimestamp = now
+                svc.currentForegroundPackage = ""
+                svc.currentForegroundClass = ""
                 svc.wasBlockingActive = false
                 svc.wasTimedFocusActive = false
                 svc.handler.post {
@@ -552,6 +577,11 @@ class AppBlockerService : Service() {
 
         fun notifyStateChanged() {
             instance?.let { svc ->
+                if (FocusLockApp.isNonLockActivityInForeground) {
+                    svc.minEventTimestamp = System.currentTimeMillis()
+                    svc.currentForegroundPackage = svc.packageName
+                    svc.currentForegroundClass = ""
+                }
                 svc.wasBlockingActive = false
                 svc.lastUsageRefreshMillis = 0L
                 svc.wasTimedFocusActive = svc.getPrefs().isTimedFocusActive()
@@ -566,7 +596,7 @@ class AppBlockerService : Service() {
                 val now = System.currentTimeMillis()
                 it.currentForegroundPackage = ""
                 it.currentForegroundClass = ""
-                it.ignoreEventsBeforeTimestamp = now - 30L
+                it.minEventTimestamp = now
                 it.lastBlockedTime = now + 700L
             }
         }

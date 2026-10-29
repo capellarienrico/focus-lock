@@ -425,22 +425,22 @@ class LockOverlayController(
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
 
-        // Envia PendingIntent com permissão explícita de BAL no Android 14+ enquanto o Overlay ainda está visível
+        // Com SYSTEM_ALERT_WINDOW concedida, startActivity direto possui isenção oficial de BAL no Android 10–16
         try {
-            val piFlags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            val pi = PendingIntent.getActivity(serviceContext, 2002, homeIntent, piFlags)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                val options = ActivityOptions.makeBasic()
-                    .setPendingIntentBackgroundActivityStartMode(
-                        ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
-                    )
-                pi.send(serviceContext, 0, null, null, null, null, options.toBundle())
-            } else {
-                pi.send()
-            }
+            serviceContext.startActivity(homeIntent)
         } catch (_: Exception) {
             try {
-                serviceContext.startActivity(homeIntent)
+                val piFlags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                val pi = PendingIntent.getActivity(serviceContext, 2002, homeIntent, piFlags)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    val options = ActivityOptions.makeBasic()
+                        .setPendingIntentBackgroundActivityStartMode(
+                            ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                        )
+                    pi.send(serviceContext, 0, null, null, null, null, options.toBundle())
+                } else {
+                    pi.send()
+                }
             } catch (_: Exception) {
             }
         }

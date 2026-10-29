@@ -48,7 +48,7 @@ class BlockPreferences(private val appContext: Context) {
         }
 
     var isAntiTamperEnabled: Boolean
-        get() = prefs.getBoolean(KEY_ANTI_TAMPER, true)
+        get() = prefs.getBoolean(KEY_ANTI_TAMPER, false)
         set(value) {
             prefs.edit().putBoolean(KEY_ANTI_TAMPER, value).commit()
         }
@@ -497,6 +497,12 @@ class BlockPreferences(private val appContext: Context) {
         }
         try {
             val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            appContext.packageManager.queryIntentActivities(homeIntent, PackageManager.MATCH_ALL)
+                .mapNotNull { it.activityInfo?.packageName }
+                .forEach {
+                    sysResult.add(it)
+                    homeResult.add(it)
+                }
             appContext.packageManager.queryIntentActivities(homeIntent, 0)
                 .mapNotNull { it.activityInfo?.packageName }
                 .forEach {
@@ -577,8 +583,22 @@ class BlockPreferences(private val appContext: Context) {
             lower.contains("securitycenter")
         ) return true
 
-        // Teclados / IMEs e Launchers do sistema
+        // Teclados / IMEs, Launchers do sistema e Gavetas/Buscas de Aplicativos (Samsung Finder, Xiaomi Drawer, etc.)
         if (packageName == "com.miui.home" ||
+            packageName == "com.samsung.android.app.galaxyfinder" ||
+            packageName == "com.samsung.android.app.cocktailbarservice" ||
+            packageName == "com.mi.android.globalminusscreen" ||
+            packageName == "com.miui.personalassistant" ||
+            packageName == "com.android.quicksearchbox" ||
+            packageName == "com.heytap.quicksearchbox" ||
+            packageName == "com.oppo.quicksearchbox" ||
+            packageName == "com.coloros.assistantscreen" ||
+            packageName == "com.google.android.as" ||
+            packageName == "com.android.wallpaper" ||
+            packageName == "ginlemon.flowerfree" ||
+            packageName == "com.bllocosn" ||
+            packageName == "ru.execbit.aiolauncher" ||
+            packageName == "com.ss.squarehome2" ||
             lower.endsWith(".home") ||
             lower.contains("inputmethod") ||
             lower.contains("keyboard") ||
@@ -740,7 +760,7 @@ class BlockPreferences(private val appContext: Context) {
 
         private const val KEY_PASSWORD_CONFIGURED = "password_configured"
         private const val KEY_STRICTNESS_MODE = "strictness_mode"
-        private const val KEY_ANTI_TAMPER = "anti_tamper_enabled"
+        private const val KEY_ANTI_TAMPER = "anti_tamper_v31_enabled"
         private const val KEY_BLOCK_SHORTS_REELS = "block_shorts_reels"
         private const val KEY_COGNITIVE_CHALLENGE = "cognitive_challenge"
         private const val KEY_MONK_MODE_TIMER = "monk_mode_timer"
