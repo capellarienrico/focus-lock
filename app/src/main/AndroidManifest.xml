@@ -9,16 +9,31 @@
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- Android 11+ Package Visibility (substitui QUERY_ALL_PACKAGES sem acionar antifraude bancário) -->
+    <!-- Android 11+ Package Visibility (apps, launchers da tela inicial, discador e teclados) -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+        </intent>
+        <intent>
+            <action android:name="android.view.InputMethod" />
         </intent>
     </queries>
 
@@ -48,6 +63,10 @@
                 <action android:name="android.nfc.action.TECH_DISCOVERED" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+
+            <meta-data
+                android:name="android.nfc.action.TECH_DISCOVERED"
+                android:resource="@xml/nfc_tech_filter" />
         </activity>
 
         <!-- Lock Screen Activity -->
@@ -62,7 +81,7 @@
             android:turnScreenOn="true"
             android:theme="@style/Theme.FocusLock.LockScreen" />
 
-        <!-- UsageStats Service (Bank-Safe App Blocker without AccessibilityService) -->
+        <!-- UsageStats + WindowManager Overlay Service (Bank-Safe App Blocker without AccessibilityService) -->
         <service
             android:name=".AppBlockerService"
             android:enabled="true"
@@ -72,6 +91,19 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="focus_app_blocker" />
         </service>
+
+        <!-- Boot & Auto-Restart Receiver -->
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.focuslock.zen.ACTION_RESTART_SERVICE" />
+            </intent-filter>
+        </receiver>
 
     </application>
 

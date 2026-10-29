@@ -1,17 +1,20 @@
 package com.focuslock.app
 
+import android.Manifest
 import android.app.PendingIntent
 import android.app.TimePickerDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.net.Uri
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.text.InputType
 import android.text.method.HideReturnsTransformationMethod
@@ -28,6 +31,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.focuslock.app.databinding.ActivityMainBinding
 import com.google.android.material.button.MaterialButton
@@ -44,6 +48,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingIntent: PendingIntent? = null
     private var isWaitingForNfcRegistration = false
     private var isFirstSetupDialogShowing = false
+    private var hasPromptedNotifications = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -54,11 +59,17 @@ class MainActivity : AppCompatActivity() {
         setupTabs()
         setupNfc()
         setupListeners()
+
+        if (savedInstanceState == null) {
+            extractAndHandleNfcIntent(intent)
+        }
     }
 
     override fun onResume() {
         super.onResume()
+        isResumed = true
         checkFirstTimePasswordSetup()
+        requestNotificationPermissionIfNeeded()
         checkPermissionsStatus()
         checkNfcStatus()
         updateUI()
@@ -67,8 +78,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
+        isResumed = false
         super.onPause()
         nfcAdapter?.disableForegroundDispatch(this)
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (hasPromptedNotifications || !prefs.isMasterPasswordConfigured) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                hasPromptedNotifications = true
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    1005
+                )
+            }
+        }
     }
 
     private fun checkFirstTimePasswordSetup() {
@@ -166,6 +194,7 @@ class MainActivity : AppCompatActivity() {
                         isFirstSetupDialogShowing = false
                         Toast.makeText(this, "Senha Mestre configurada com sucesso!", Toast.LENGTH_SHORT).show()
                         dialog.dismiss()
+                        requestNotificationPermissionIfNeeded()
                         updateUI()
                     }
                 }
@@ -196,6 +225,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
+        extractAndHandleNfcIntent(intent)
+    }
+
+    private fun extractAndHandleNfcIntent(intent: Intent?) {
+        if (intent == null) return
         val tag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java)
         } else {
@@ -232,10 +267,13 @@ class MainActivity : AppCompatActivity() {
                 if (hadSchedule) {
                     prefs.snoozeSchedulesForMinutes(15)
                 }
+                AppBlockerService.onUnlocked()
                 Toast.makeText(this, "Modo Foco Desativado via $tagName!", Toast.LENGTH_SHORT).show()
             } else {
                 if (!ensureAccessibilityBeforeLock()) return
                 prefs.isManualLockActive = true
+                AppBlockerService.ensureRunning(this)
+                AppBlockerService.notifyStateChanged()
                 Toast.makeText(this, "Modo Foco Ativado via $tagName!", Toast.LENGTH_SHORT).show()
             }
             updateUI()
@@ -322,6 +360,7 @@ class MainActivity : AppCompatActivity() {
                 if (!ensureAccessibilityBeforeLock()) return@setOnClickListener
                 prefs.isManualLockActive = true
                 AppBlockerService.ensureRunning(this)
+                AppBlockerService.notifyStateChanged()
                 Toast.makeText(this, "Bloqueio ativado com sucesso!", Toast.LENGTH_SHORT).show()
                 updateUI()
             }
@@ -376,6 +415,10 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Exception) {
                 startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
             }
+        }
+
+        binding.btnDisableBatteryOpt.setOnClickListener {
+            requestIgnoreBatteryOptimizations()
         }
 
         binding.btnAddSchedule.setOnClickListener {
@@ -865,6 +908,8 @@ class MainActivity : AppCompatActivity() {
                 prefs.scheduleSnoozeUntilMillis = 0L
             }
             prefs.saveSchedules(list)
+            AppBlockerService.ensureRunning(this)
+            AppBlockerService.notifyStateChanged()
             Toast.makeText(
                 this,
                 if (enabled) "Bloco de horário ativado!" else "Bloco de horário desativado.",
@@ -1034,6 +1079,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 prefs.scheduleSnoozeUntilMillis = 0L
                 prefs.saveSchedules(currentList)
+                AppBlockerService.notifyStateChanged()
                 Toast.makeText(this, "Bloco de horário salvo!", Toast.LENGTH_SHORT).show()
                 dialog.dismiss()
                 updateUI()
@@ -1155,6 +1201,7 @@ class MainActivity : AppCompatActivity() {
                     .setItems(options) { _, which ->
                         val mins = minutesValues[which]
                         prefs.snoozeSchedulesForMinutes(mins)
+                        AppBlockerService.onUnlocked()
                         Toast.makeText(
                             this,
                             "Desbloqueado! (Horários pausados por $mins min)",
@@ -1164,6 +1211,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     .show()
             } else {
+                AppBlockerService.onUnlocked()
                 Toast.makeText(this, "Desbloqueado com sucesso!", Toast.LENGTH_SHORT).show()
                 updateUI()
             }
@@ -1452,20 +1500,56 @@ class MainActivity : AppCompatActivity() {
         renderSchedulesList()
     }
 
+    private fun isBatteryOptimizationIgnored(): Boolean {
+        return try {
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+            pm?.isIgnoringBatteryOptimizations(packageName) ?: true
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    private fun requestIgnoreBatteryOptimizations() {
+        try {
+            val intent = Intent(
+                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                Uri.parse("package:$packageName")
+            )
+            startActivity(intent)
+        } catch (_: Exception) {
+            try {
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     private fun checkPermissionsStatus() {
         val isUsageStatsEnabled = AppBlockerService.isServiceEnabled(this)
         val isOverlayEnabled = Settings.canDrawOverlays(this)
+        val isBatteryIgnored = isBatteryOptimizationIgnored()
 
         if (isUsageStatsEnabled) {
             AppBlockerService.ensureRunning(this)
         }
 
-        if (isUsageStatsEnabled && isOverlayEnabled) {
+        if (isUsageStatsEnabled && isOverlayEnabled && isBatteryIgnored) {
             binding.cardAccessibilityWarning.visibility = View.GONE
         } else {
             binding.cardAccessibilityWarning.visibility = View.VISIBLE
             binding.btnEnableAccessibility.visibility = if (isUsageStatsEnabled) View.GONE else View.VISIBLE
             binding.btnEnableOverlay.visibility = if (isOverlayEnabled) View.GONE else View.VISIBLE
+            binding.btnDisableBatteryOpt.visibility = if (isBatteryIgnored) View.GONE else View.VISIBLE
+
+            if (isUsageStatsEnabled && isOverlayEnabled && !isBatteryIgnored) {
+                binding.tvPermissionWarningTitle.text = "⚡ Recomendado: Evitar Pausa em Segundo Plano"
+                binding.tvPermissionWarningDesc.text =
+                    "Toque abaixo para permitir que o FocusLock continue monitorando seus apps sem ser suspenso pela economia de bateria do Android."
+            } else {
+                binding.tvPermissionWarningTitle.text = "⚠️ Permissões Necessárias para o Bloqueio"
+                binding.tvPermissionWarningDesc.text =
+                    "Ative o Acesso ao Uso e a Sobreposição de Tela (modo seguro compatível com apps de banco, sem usar Acessibilidade)."
+            }
         }
     }
 
@@ -1483,5 +1567,11 @@ class MainActivity : AppCompatActivity() {
             sb.append(String.format("%02X:", b))
         }
         return if (sb.isNotEmpty()) sb.substring(0, sb.length - 1) else ""
+    }
+
+    companion object {
+        @Volatile
+        var isResumed: Boolean = false
+            private set
     }
 }

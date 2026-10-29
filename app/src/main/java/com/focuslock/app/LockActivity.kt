@@ -199,6 +199,7 @@ class LockActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         isShowing = true
+        AppBlockerService.onLockActivityResumed()
         nfcAdapter?.enableForegroundDispatch(this, pendingIntent, null, null)
     }
 
@@ -337,6 +338,7 @@ class LockActivity : AppCompatActivity() {
                 val mins = prefs.dailySessionMinutes
                 prefs.snoozeSchedulesForMinutes(mins)
                 isShowing = false
+                AppBlockerService.onUnlocked()
                 val used = prefs.getDailyOpensUsedToday()
                 val max = prefs.dailyMaxOpens
                 Toast.makeText(
@@ -363,6 +365,7 @@ class LockActivity : AppCompatActivity() {
                     val mins = minutesValues[which]
                     prefs.snoozeSchedulesForMinutes(mins)
                     isShowing = false
+                    AppBlockerService.onUnlocked()
                     Toast.makeText(
                         this,
                         "$message (Liberado por $mins min)",
@@ -373,6 +376,7 @@ class LockActivity : AppCompatActivity() {
                 .show()
         } else {
             isShowing = false
+            AppBlockerService.onUnlocked()
             Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
             finish()
         }

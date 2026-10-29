@@ -22,8 +22,20 @@ Aplicativo Android nativo (Kotlin) desenvolvido para bloqueio de distrações, c
 
 4. **Exceções Permanentes de Segurança**:
    - **WhatsApp** (comum e business) permanece sempre liberado.
+   - **Aplicativos de Banco** (Nubank, Itaú, Bradesco, BB, Inter, etc.) permanecem sempre liberados.
    - **Discador de emergência / Telefone** permanece sempre liberado.
-   - O próprio **FocusLock** permanece liberado (protegido por PIN para alterações).
+   - O próprio **FocusLock** permanece liberado (protegido por Senha Mestre para alterações).
 
-5. **Motor de Bloqueio em Tempo Real**:
-   - Utiliza `AccessibilityService` (`TYPE_WINDOW_STATE_CHANGED`) para detectar a abertura de apps bloqueados com latência zero e redirecionar para a tela de bloqueio com aviso e desbloqueio.
+5. **Motor de Bloqueio em Tempo Real (Compatível com Bancos)**:
+   - Utiliza `UsageStatsManager` (Acesso ao Uso) + `WindowManager` (`TYPE_APPLICATION_OVERLAY`) em vez de `AccessibilityService`, bloqueando instantaneamente apps restritos no Android 8 a 16 sem conflitar com o antifraude de aplicativos bancários e sem sofrer bloqueios de *Background Activity Launch (BAL)*.
+
+---
+
+## 📲 Como Instalar e Configurar
+
+1. Baixe o **`FocusLock.apk`** mais recente na aba [**Releases**](https://github.com/capellarienrico/focus-lock/releases/latest) *(caso tenha uma versão antiga instalada, desinstale-a antes)*.
+2. Abra o app e defina sua **Senha Mestre**.
+3. Conceda as permissões exibidas no topo do app:
+   - **Acesso ao Uso de Apps** (para identificar qual app foi aberto).
+   - **Sobrepor a Outros Apps** (para exibir o escudo de bloqueio imediatamente sobre o app restrito).
+   - **Sem Restrição de Bateria** *(recomendado para manter o serviço ativo em segundo plano)*.

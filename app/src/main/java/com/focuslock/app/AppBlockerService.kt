@@ -1,5 +1,8 @@
 package com.focuslock.app
 
+import android.Manifest
+import android.app.ActivityOptions
+import android.app.AlarmManager
 import android.app.AppOpsManager
 import android.app.Notification
 import android.app.NotificationChannel
@@ -10,6 +13,7 @@ import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Handler
@@ -17,41 +21,47 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.os.Process
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 
 /**
- * Serviço de bloqueio baseado em UsageStatsManager (Acesso ao Uso).
+ * Serviço de bloqueio baseado em UsageStatsManager (Acesso ao Uso) + WindowManager Overlay.
  *
- * Ao contrário do AccessibilityService, o UsageStatsManager NÃO possui capacidade de ler textos
- * da tela, senhas ou chaves PIX, nem interagir/clicar em outros aplicativos. Isso evita falsos
- * positivos em sistemas antifraude de aplicativos bancários (como Nubank, Itaú, Bradesco, etc.).
+ * 100% compatível com aplicativos bancários (sem AccessibilityService) e imune às restrições
+ * de Background Activity Launch (BAL) do Android 14/15/16 e ROMs customizadas (Samsung, Xiaomi, Motorola).
  */
 class AppBlockerService : Service() {
 
     private var lastBlockedTime = 0L
     private var lastStatRecordedTime = 0L
+    private var ignoreEventsBeforeTimestamp = 0L
     private var currentForegroundPackage = ""
     private var currentForegroundClass = ""
     private var wasBlockingActive = false
     private val handler = Handler(Looper.getMainLooper())
     private var powerManager: PowerManager? = null
+    private var lockOverlay: LockOverlayController? = null
 
     private val watchdogRunnable = object : Runnable {
         override fun run() {
-            var nextDelay = 1500L
+            var nextDelay = 1200L
             try {
                 val isScreenOn = powerManager?.isInteractive ?: true
                 if (isScreenOn) {
-                    val prefs = (application as? FocusLockApp)?.prefs
-                    val isActive = prefs?.isBlockingCurrentlyActive() == true
+                    val prefs = getPrefs()
+                    val isActive = prefs.isBlockingCurrentlyActive()
                     if (isActive) {
-                        nextDelay = 450L
-                        val lookbackMs = if (!wasBlockingActive) 120_000L else 5_000L
+                        nextDelay = 350L
+                        // Janela de 2h na ativação inicial e 60s contínuos para evitar falha de micro-janela no Android 14/15+
+                        val lookbackMs = if (!wasBlockingActive) 7_200_000L else 60_000L
                         wasBlockingActive = true
                         checkCurrentWindowAndBlock(lookbackMs)
                     } else {
+                        if (wasBlockingActive) {
+                            lockOverlay?.dismiss()
+                        }
                         wasBlockingActive = false
                     }
                 } else {
@@ -69,14 +79,36 @@ class AppBlockerService : Service() {
         instance = this
         isRunning = true
         powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        lockOverlay = LockOverlayController(
+            serviceContext = this,
+            prefsProvider = { getPrefs() },
+            onOverlayVisibleCallback = { blockedReason ->
+                launchLockActivitySafely(blockedReason)
+            }
+        )
         startForegroundSafely()
+        restartWatchdogNow()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        instance = this
+        isRunning = true
+        startForegroundSafely()
+        restartWatchdogNow()
+        return START_STICKY
+    }
+
+    private fun restartWatchdogNow() {
         handler.removeCallbacks(watchdogRunnable)
         handler.post(watchdogRunnable)
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForegroundSafely()
-        return START_STICKY
+    private fun getPrefs(): BlockPreferences {
+        return (application as? FocusLockApp)?.prefs ?: BlockPreferences(applicationContext)
+    }
+
+    private fun isLockUiShowing(): Boolean {
+        return LockActivity.isShowing || (lockOverlay?.isShowing == true)
     }
 
     private fun startForegroundSafely() {
@@ -98,17 +130,13 @@ class AppBlockerService : Service() {
             val openIntent = Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
             }
-            val piFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            } else {
-                PendingIntent.FLAG_UPDATE_CURRENT
-            }
+            val piFlags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             val contentIntent = PendingIntent.getActivity(this, 0, openIntent, piFlags)
 
             val notification: Notification = NotificationCompat.Builder(this, channelId)
                 .setSmallIcon(R.drawable.ic_focus_shield)
                 .setContentTitle("FocusLock Ativo")
-                .setContentText("Proteção de foco pronta (Modo Compatível com Bancos)")
+                .setContentText("Proteção de foco ativa em segundo plano (Modo Seguro Bancos)")
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)
                 .setSilent(true)
@@ -142,7 +170,15 @@ class AppBlockerService : Service() {
             ?: return currentForegroundPackage to currentForegroundClass
 
         val now = System.currentTimeMillis()
-        val events = usm.queryEvents(now - lookbackMs, now)
+
+        // Se aguardávamos transição para a Home mas nenhum app novo assumiu o foco após 1.6s,
+        // limpa o filtro temporal para reavaliar o aplicativo que continuou aberto na tela.
+        if (ignoreEventsBeforeTimestamp > 0L && now - ignoreEventsBeforeTimestamp > 1600L) {
+            ignoreEventsBeforeTimestamp = 0L
+        }
+
+        val startQueryTime = maxOf(now - lookbackMs, ignoreEventsBeforeTimestamp)
+        val events = usm.queryEvents(startQueryTime, now)
         val event = UsageEvents.Event()
         var latestPkg: String? = null
         var latestClass: String? = null
@@ -153,7 +189,7 @@ class AppBlockerService : Service() {
             if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED ||
                 event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND
             ) {
-                if (event.timeStamp >= latestTime) {
+                if (event.timeStamp >= ignoreEventsBeforeTimestamp && event.timeStamp >= latestTime) {
                     latestTime = event.timeStamp
                     latestPkg = event.packageName
                     latestClass = event.className ?: ""
@@ -164,11 +200,26 @@ class AppBlockerService : Service() {
         if (!latestPkg.isNullOrBlank()) {
             currentForegroundPackage = latestPkg
             currentForegroundClass = latestClass ?: ""
-        } else if (currentForegroundPackage.isBlank()) {
-            val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - 60_000L, now)
-            val mostRecent = stats?.maxByOrNull { it.lastTimeUsed }
-            if (mostRecent != null && !mostRecent.packageName.isNullOrBlank()) {
-                currentForegroundPackage = mostRecent.packageName
+            if (ignoreEventsBeforeTimestamp > 0L && latestPkg != this.packageName) {
+                ignoreEventsBeforeTimestamp = 0L
+            }
+        } else if (ignoreEventsBeforeTimestamp == 0L) {
+            val isSelfActuallyInForeground = MainActivity.isResumed || LockActivity.isShowing
+            if (currentForegroundPackage.isBlank() ||
+                (currentForegroundPackage == this.packageName && !isSelfActuallyInForeground)
+            ) {
+                val stats = usm.queryUsageStats(
+                    UsageStatsManager.INTERVAL_DAILY,
+                    now - 14_400_000L,
+                    now
+                )
+                val mostRecent = stats
+                    ?.filter { !it.packageName.isNullOrBlank() && (isSelfActuallyInForeground || it.packageName != this.packageName) }
+                    ?.maxByOrNull { it.lastTimeUsed }
+                if (mostRecent != null) {
+                    currentForegroundPackage = mostRecent.packageName
+                    currentForegroundClass = ""
+                }
             }
         }
 
@@ -183,14 +234,14 @@ class AppBlockerService : Service() {
             return
         }
 
-        val prefs = (application as? FocusLockApp)?.prefs ?: BlockPreferences(applicationContext)
+        val prefs = getPrefs()
 
-        if (!prefs.isBlockingCurrentlyActive() || LockActivity.isShowing) {
+        if (!prefs.isBlockingCurrentlyActive() || isLockUiShowing()) {
             return
         }
 
         val now = System.currentTimeMillis()
-        if (now - lastBlockedTime < 400L) {
+        if (now < lastBlockedTime || now - lastBlockedTime < 350L) {
             return
         }
 
@@ -201,7 +252,7 @@ class AppBlockerService : Service() {
                 lastStatRecordedTime = now
                 prefs.recordBlockedAttempt()
             }
-            launchLockScreen("Proteção Anti-Burla (Configurações)")
+            showBlockScreen("Proteção Anti-Burla (Configurações)")
             return
         }
 
@@ -212,12 +263,11 @@ class AppBlockerService : Service() {
                 prefs.recordBlockedAttempt()
             }
             Log.d("AppBlockerService", "Bloqueando pacote restrito: $packageName")
-            launchLockScreen(packageName)
+            showBlockScreen(packageName)
         }
     }
 
     private fun isSettingsTamperAttempt(packageName: String, className: String): Boolean {
-        // Só ativa a proteção anti-burla se ambas as permissões já estiverem concedidas
         if (!isServiceEnabled(this) || !Settings.canDrawOverlays(this)) {
             return false
         }
@@ -243,7 +293,18 @@ class AppBlockerService : Service() {
         return tamperClasses.any { lowerClass.contains(it) }
     }
 
-    private fun launchLockScreen(blockedPkgOrReason: String) {
+    private fun showBlockScreen(blockedPkgOrReason: String) {
+        // Camada 1: Bloqueio instantâneo garantido via WindowManager (TYPE_APPLICATION_OVERLAY).
+        // Não sofre bloqueio de Background Activity Launch (BAL) em nenhum Android ou fabricante.
+        val overlayShown = lockOverlay?.show(blockedPkgOrReason) == true
+        if (!overlayShown) {
+            // Fallback direto caso a sobreposição não esteja disponível
+            launchLockActivitySafely(blockedPkgOrReason)
+        }
+    }
+
+    private fun launchLockActivitySafely(blockedPkgOrReason: String) {
+        if (LockActivity.isShowing) return
         val lockIntent = Intent(this, LockActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                     Intent.FLAG_ACTIVITY_CLEAR_TOP or
@@ -251,13 +312,63 @@ class AppBlockerService : Service() {
                     Intent.FLAG_ACTIVITY_NO_ANIMATION
             putExtra("BLOCKED_PACKAGE", blockedPkgOrReason)
         }
-        startActivity(lockIntent)
+
+        // Camada 2: Dispara PendingIntent com opt-in explícito de BAL (Android 14+) enquanto o Overlay
+        // está visível na tela, permitindo que a LockActivity assuma o ForegroundDispatch do NFC.
+        try {
+            val piFlags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            val pi = PendingIntent.getActivity(this, 2001, lockIntent, piFlags)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                val options = ActivityOptions.makeBasic()
+                    .setPendingIntentBackgroundActivityStartMode(
+                        ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                    )
+                pi.send(this, 0, null, null, null, null, options.toBundle())
+            } else {
+                pi.send()
+            }
+        } catch (_: Exception) {
+            try {
+                startActivity(lockIntent)
+            } catch (e: Exception) {
+                Log.w("AppBlockerService", "LockActivity bloqueada por BAL; mantendo LockOverlay ativo", e)
+            }
+        }
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        scheduleRestartAlarm()
+    }
+
+    private fun scheduleRestartAlarm() {
+        try {
+            val restartIntent = Intent(applicationContext, BootReceiver::class.java).apply {
+                action = BootReceiver.ACTION_RESTART_SERVICE
+            }
+            val pi = PendingIntent.getBroadcast(
+                applicationContext,
+                3001,
+                restartIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val am = getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+            am?.set(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime() + 1000L,
+                pi
+            )
+        } catch (e: Exception) {
+            Log.w("AppBlockerService", "Não foi possível agendar reinício automático", e)
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
         handler.removeCallbacks(watchdogRunnable)
+        lockOverlay?.dismiss()
+        lockOverlay = null
         isRunning = false
         instance = null
         super.onDestroy()
@@ -275,11 +386,45 @@ class AppBlockerService : Service() {
         var instance: AppBlockerService? = null
             private set
 
+        fun onLockActivityResumed() {
+            instance?.handler?.post {
+                if (LockActivity.isShowing) {
+                    instance?.lockOverlay?.dismiss()
+                }
+            }
+        }
+
+        fun dismissOverlay() {
+            instance?.handler?.post {
+                instance?.lockOverlay?.dismiss()
+            }
+        }
+
+        fun onUnlocked() {
+            instance?.let { svc ->
+                svc.wasBlockingActive = false
+                svc.handler.post {
+                    svc.lockOverlay?.dismiss()
+                }
+            }
+        }
+
+        fun notifyStateChanged() {
+            instance?.let { svc ->
+                svc.wasBlockingActive = false
+                svc.handler.post {
+                    svc.restartWatchdogNow()
+                }
+            }
+        }
+
         fun onNavigatedHome() {
             instance?.let {
+                val now = System.currentTimeMillis()
                 it.currentForegroundPackage = ""
                 it.currentForegroundClass = ""
-                it.lastBlockedTime = System.currentTimeMillis() + 600L
+                it.ignoreEventsBeforeTimestamp = now - 30L
+                it.lastBlockedTime = now + 700L
             }
         }
 
@@ -300,7 +445,12 @@ class AppBlockerService : Service() {
                         context.packageName
                     )
                 }
-                mode == AppOpsManager.MODE_ALLOWED
+                if (mode == AppOpsManager.MODE_DEFAULT) {
+                    context.checkCallingOrSelfPermission(Manifest.permission.PACKAGE_USAGE_STATS) ==
+                            PackageManager.PERMISSION_GRANTED
+                } else {
+                    mode == AppOpsManager.MODE_ALLOWED
+                }
             } catch (_: Exception) {
                 false
             }

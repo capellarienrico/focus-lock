@@ -308,7 +308,9 @@ class BlockPreferences(private val appContext: Context) {
 
         // 2. Bloqueio Manual ativo
         if (isManualLockActive) {
-            return globalBlockedList.isEmpty() || globalBlockedList.contains(packageName)
+            if (globalBlockedList.isEmpty() || globalBlockedList.contains(packageName)) {
+                return true
+            }
         }
 
         // 3. Verificação de Agendamentos / Blocos de Horário ativos (com suporte a lista por horário)
@@ -344,12 +346,23 @@ class BlockPreferences(private val appContext: Context) {
         try {
             val imm = appContext.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
             imm?.enabledInputMethodList?.forEach { result.add(it.packageName) }
+            imm?.inputMethodList?.forEach { result.add(it.packageName) }
         } catch (_: Exception) {
         }
         try {
             val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            appContext.packageManager.queryIntentActivities(homeIntent, 0)
+                .mapNotNull { it.activityInfo?.packageName }
+                .forEach { result.add(it) }
             val resolveInfo = appContext.packageManager.resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
             resolveInfo?.activityInfo?.packageName?.let { result.add(it) }
+        } catch (_: Exception) {
+        }
+        try {
+            val dialIntent = Intent(Intent.ACTION_DIAL)
+            appContext.packageManager.queryIntentActivities(dialIntent, 0)
+                .mapNotNull { it.activityInfo?.packageName }
+                .forEach { result.add(it) }
         } catch (_: Exception) {
         }
         cachedAllowedSysPackages = result
@@ -379,12 +392,14 @@ class BlockPreferences(private val appContext: Context) {
         if (packageName == appContext.packageName || lower.startsWith("com.focuslock")) return true
 
         // Discadores e telefone de emergência
-        if (lower.contains("dialer") || lower.contains("telecom") ||
-            lower.contains("phone") || lower.contains("incall") ||
+        if (packageName == "com.android.phone" ||
+            lower.contains("dialer") ||
+            lower.contains("telecom") ||
+            lower.contains("incall") ||
             lower.contains("emergency")
         ) return true
 
-        // UI do sistema, configurações do Android (para permitir ativar acessibilidade/NFC) e instalador/permissões
+        // UI do sistema, configurações do Android e instalador/permissões
         if (packageName == "com.android.systemui" ||
             packageName == "android" ||
             packageName == "com.android.settings" ||
@@ -393,11 +408,17 @@ class BlockPreferences(private val appContext: Context) {
             lower.contains("securitycenter")
         ) return true
 
-        // Teclados / IMEs e Launchers por nome
-        if (lower.contains("inputmethod") || lower.contains("keyboard") ||
-            lower.contains("gboard") || lower.contains("honeyboard") ||
-            lower.contains("swiftkey") || lower.contains("latinime") ||
-            lower.contains("launcher") || lower.contains("home") || lower.contains("trebuchet")
+        // Teclados / IMEs e Launchers do sistema
+        if (packageName == "com.miui.home" ||
+            lower.endsWith(".home") ||
+            lower.contains("inputmethod") ||
+            lower.contains("keyboard") ||
+            lower.contains("gboard") ||
+            lower.contains("honeyboard") ||
+            lower.contains("swiftkey") ||
+            lower.contains("latinime") ||
+            lower.contains("launcher") ||
+            lower.contains("trebuchet")
         ) return true
 
         if (getDynamicSystemAllowedPackages().contains(packageName)) {

@@ -7,6 +7,9 @@ on:
     branches: [ "**" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -32,9 +35,25 @@ jobs:
           ./gradlew assembleRelease --stacktrace
           mkdir -p app/build/outputs/apk/debug
           cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/debug/app-debug.apk
+          cp app/build/outputs/apk/release/app-release.apk FocusLock.apk
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: FocusLock-Debug-APK
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Publish GitHub Release v2.1
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view v2.1 >/dev/null 2>&1; then
+            gh release upload v2.1 FocusLock.apk --clobber
+          else
+            gh release create v2.1 FocusLock.apk \
+              --title "FocusLock v2.1 (Motor de Bloqueio Overlay + Compatível com Bancos)" \
+              --notes "FocusLock v2.1 APK pronto para instalação direta no Android. Corrige o bloqueio de aplicativos no Android 11 a 16 (Samsung, Xiaomi, Motorola, Pixel) usando janela de sobreposição real (WindowManager Overlay) imune ao bloqueio de Background Activity Launch (BAL), visibilidade total no UsageStatsManager e 100% compatível com apps de banco (sem AccessibilityService)." \
+              --latest
+          fi

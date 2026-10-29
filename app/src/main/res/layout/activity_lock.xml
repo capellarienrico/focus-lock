@@ -78,6 +78,7 @@
 
         <!-- NFC Instruction Card -->
         <LinearLayout
+            android:id="@+id/cardNfcPrompt"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
@@ -206,6 +207,123 @@
                 android:textColor="@color/text_white"
                 android:textStyle="bold"
                 app:cornerRadius="12dp" />
+        </LinearLayout>
+
+        <!-- Inline Cognitive Challenge Container (Overlay-safe without AlertDialog) -->
+        <LinearLayout
+            android:id="@+id/llCognitiveSection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/bg_card"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/tvCognitivePrompt"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="🧠 Desafio Cognitivo (Anti-Impulso)"
+                android:textColor="@color/text_white"
+                android:textSize="14sp" />
+
+            <EditText
+                android:id="@+id/etCognitiveAnswer"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="10dp"
+                android:gravity="center"
+                android:hint="Resultado numérico"
+                android:inputType="number"
+                android:maxLength="8"
+                android:singleLine="true"
+                android:textColor="@color/text_white"
+                android:textColorHint="@color/text_secondary"
+                android:textSize="16sp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnConfirmCognitive"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="10dp"
+                android:backgroundTint="@color/accent_green"
+                android:text="CONFIRMAR CÁLCULO"
+                android:textColor="@color/bg_dark"
+                android:textStyle="bold"
+                app:cornerRadius="10dp" />
+        </LinearLayout>
+
+        <!-- Inline Snooze Duration Container (Overlay-safe without AlertDialog) -->
+        <LinearLayout
+            android:id="@+id/llSnoozeSection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/bg_card"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="Por quanto tempo deseja liberar?"
+                android:textColor="@color/text_white"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSnooze1m"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="1 minuto (Olhada rápida - ScreenZen)"
+                android:textAllCaps="false"
+                android:textColor="@color/accent_blue"
+                app:cornerRadius="8dp"
+                app:strokeColor="@color/accent_blue" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSnooze5m"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="5 minutos"
+                android:textAllCaps="false"
+                android:textColor="@color/accent_blue"
+                app:cornerRadius="8dp"
+                app:strokeColor="@color/accent_blue" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSnooze15m"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="15 minutos"
+                android:textAllCaps="false"
+                android:textColor="@color/accent_blue"
+                app:cornerRadius="8dp"
+                app:strokeColor="@color/accent_blue" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSnooze30m"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="30 minutos"
+                android:textAllCaps="false"
+                android:textColor="@color/accent_blue"
+                app:cornerRadius="8dp"
+                app:strokeColor="@color/accent_blue" />
         </LinearLayout>
 
         <TextView
