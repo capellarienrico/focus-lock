@@ -94,6 +94,17 @@ class LockActivity : AppCompatActivity() {
                     binding.tvBlockedAppName.text =
                         "Feed curto (Shorts / Reels) bloqueado! Vídeos normais e mensagens continuam liberados."
                 }
+                pkg.startsWith("TIME_LIMIT:") -> {
+                    val targetPkg = pkg.removePrefix("TIME_LIMIT:")
+                    val appLabel = try {
+                        val ai = packageManager.getApplicationInfo(targetPkg, 0)
+                        packageManager.getApplicationLabel(ai).toString()
+                    } catch (_: Exception) {
+                        "este aplicativo"
+                    }
+                    binding.tvBlockedAppName.text =
+                        "⏳ Limite Diário Atingido! Você já usou ${prefs.dailyTimeLimitMinutes} min em \"$appLabel\" hoje."
+                }
                 else -> {
                     try {
                         val appInfo = packageManager.getApplicationInfo(pkg, 0)
@@ -113,6 +124,18 @@ class LockActivity : AppCompatActivity() {
         mindfulTimer?.cancel()
         val prefs = (application as FocusLockApp).prefs
         val mode = prefs.strictnessMode
+
+        if (prefs.isTimedFocusActive() && prefs.isMonkModeOnTimerEnabled) {
+            val remMins = ((prefs.getTimedFocusRemainingMillis() / 60_000L) + 1L)
+            binding.llMindfulSection.visibility = View.VISIBLE
+            binding.llPinSection.visibility = View.GONE
+            binding.btnEmergencyPinUnlock.visibility = View.GONE
+            binding.tvMindfulPrompt.text =
+                "🧘 Modo Monge Inquebrável Ativo\nSenha Mestre desabilitada até o fim da sessão (apenas Tag NFC física libera)."
+            binding.tvMindfulCountdown.visibility = View.VISIBLE
+            binding.tvMindfulCountdown.text = "⏳ Faltam cerca de $remMins min para concluir"
+            return
+        }
 
         when (mode) {
             BlockPreferences.MODE_DEEP_FOCUS_NFC -> {
@@ -325,18 +348,23 @@ class LockActivity : AppCompatActivity() {
         mindfulTimer?.cancel()
         val prefs = (application as FocusLockApp).prefs
         val hadActiveSchedule = prefs.getSchedules().any { it.isActiveNow() }
+        val blockedReason = intent?.getStringExtra("BLOCKED_PACKAGE") ?: ""
+        val isTimeLimitBlock = blockedReason.startsWith("TIME_LIMIT:")
         prefs.isManualLockActive = false
+        prefs.stopTimedFocus()
 
         if (prefs.isDailyBudgetEnabled && !viaNfc) {
             prefs.incrementDailyOpensUsed()
         }
 
         vibrateSuccess()
+        FocusNotificationListenerService.syncSummaryNotification(this)
 
-        if (hadActiveSchedule) {
+        if (hadActiveSchedule || isTimeLimitBlock) {
             if (prefs.isDailyBudgetEnabled && !viaNfc) {
                 val mins = prefs.dailySessionMinutes
-                prefs.snoozeSchedulesForMinutes(mins)
+                if (hadActiveSchedule) prefs.snoozeSchedulesForMinutes(mins)
+                if (isTimeLimitBlock) prefs.snoozeTimeLimitForMinutes(mins)
                 isShowing = false
                 AppBlockerService.onUnlocked()
                 val used = prefs.getDailyOpensUsedToday()
@@ -363,7 +391,8 @@ class LockActivity : AppCompatActivity() {
                 .setCancelable(false)
                 .setItems(options) { _, which ->
                     val mins = minutesValues[which]
-                    prefs.snoozeSchedulesForMinutes(mins)
+                    if (hadActiveSchedule) prefs.snoozeSchedulesForMinutes(mins)
+                    if (isTimeLimitBlock) prefs.snoozeTimeLimitForMinutes(mins)
                     isShowing = false
                     AppBlockerService.onUnlocked()
                     Toast.makeText(

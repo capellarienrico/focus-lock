@@ -1,6 +1,7 @@
 package com.focuslock.app
 
 import android.Manifest
+import android.app.Activity
 import android.app.PendingIntent
 import android.app.TimePickerDialog
 import android.content.ClipData
@@ -8,15 +9,20 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.text.InputType
+import android.text.TextUtils
 import android.text.method.HideReturnsTransformationMethod
 import android.text.method.PasswordTransformationMethod
 import android.util.TypedValue
@@ -24,10 +30,12 @@ import android.view.Gravity
 import android.view.View
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
@@ -37,18 +45,115 @@ import com.focuslock.app.databinding.ActivityMainBinding
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.tabs.TabLayout
 import java.security.SecureRandom
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var prefs: BlockPreferences
+    private lateinit var notifStore: NotificationFilterStore
     private var nfcAdapter: NfcAdapter? = null
     private var pendingIntent: PendingIntent? = null
     private var isWaitingForNfcRegistration = false
     private var isFirstSetupDialogShowing = false
     private var hasPromptedNotifications = false
+
+    private val uiHandler = Handler(Looper.getMainLooper())
+    private val wellbeingExecutor = Executors.newSingleThreadExecutor()
+    private var pendingScheduleAppsCallback: ((Set<String>) -> Unit)? = null
+
+    private val notifStoreListener: () -> Unit = {
+        if (!isFinishing && !isDestroyed) {
+            updateNotificationFilterUI()
+            binding.tvKpiFilteredToday.text = notifStore.getFilteredCountToday().toString()
+        }
+    }
+
+    private val uiTickRunnable = object : Runnable {
+        override fun run() {
+            if (!isFinishing && !isDestroyed && isResumed) {
+                if (prefs.isTimedFocusActive()) {
+                    val remMs = prefs.getTimedFocusRemainingMillis()
+                    val totalSec = remMs / 1000L
+                    val mins = totalSec / 60L
+                    val secs = totalSec % 60L
+                    binding.tvLockStatus.text =
+                        String.format(Locale.US, "⏳ SESSÃO DE FOCO: %02d:%02d", mins, secs)
+                    uiHandler.postDelayed(this, 1000L)
+                } else if (prefs.timedFocusUntilMillis > 0L) {
+                    prefs.stopTimedFocus()
+                    updateUI()
+                }
+            }
+        }
+    }
+
+    private val appPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
+        val data = result.data ?: return@registerForActivityResult
+        val mode = data.getStringExtra(AppPickerActivity.EXTRA_PICKER_MODE) ?: return@registerForActivityResult
+        val selected = data.getStringArrayListExtra(AppPickerActivity.EXTRA_RESULT_PACKAGES)
+            ?.toSet() ?: emptySet()
+
+        when (mode) {
+            AppPickerActivity.MODE_GLOBAL_BLOCK -> {
+                prefs.saveBlockedPackages(selected)
+                AppBlockerService.notifyStateChanged()
+                val msg = if (selected.isEmpty()) {
+                    "Configurado para bloquear TODOS os apps (exceto WhatsApp e Bancos)."
+                } else {
+                    "${selected.size} aplicativo(s) selecionado(s) para bloqueio."
+                }
+                Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                updateUI()
+                refreshWellbeingAsync()
+            }
+            AppPickerActivity.MODE_SCHEDULE_BLOCK -> {
+                pendingScheduleAppsCallback?.invoke(selected)
+                pendingScheduleAppsCallback = null
+            }
+            AppPickerActivity.MODE_NOTIFICATION_FILTER -> {
+                prefs.saveFilteredNotificationPackages(selected)
+                if (selected.isNotEmpty() && !prefs.isNotificationFilterEnabled) {
+                    prefs.isNotificationFilterEnabled = true
+                    if (!FocusNotificationListenerService.isNotificationAccessEnabled(this)) {
+                        promptNotificationListenerPermission()
+                    }
+                }
+                FocusNotificationListenerService.syncSummaryNotification(this)
+                Toast.makeText(
+                    this,
+                    "${selected.size} app(s) configurado(s) no Filtro de Notificações!",
+                    Toast.LENGTH_SHORT
+                ).show()
+                updateUI()
+            }
+            AppPickerActivity.MODE_DAILY_TIME_LIMIT -> {
+                prefs.saveTimeLimitedPackages(selected)
+                if (selected.isNotEmpty() && !prefs.isDailyTimeLimitEnabled) {
+                    if (ensureAccessibilityBeforeLock()) {
+                        prefs.isDailyTimeLimitEnabled = true
+                    }
+                } else if (selected.isEmpty()) {
+                    prefs.isDailyTimeLimitEnabled = false
+                }
+                AppBlockerService.notifyStateChanged()
+                Toast.makeText(
+                    this,
+                    "${selected.size} app(s) com limite diário de ${prefs.dailyTimeLimitMinutes} min!",
+                    Toast.LENGTH_SHORT
+                ).show()
+                updateUI()
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,6 +161,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         prefs = (application as FocusLockApp).prefs
+        notifStore = NotificationFilterStore.getInstance(this)
         setupTabs()
         setupNfc()
         setupListeners()
@@ -68,19 +174,30 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         isResumed = true
+        notifStore.addListener(notifStoreListener)
         checkFirstTimePasswordSetup()
         requestNotificationPermissionIfNeeded()
         checkPermissionsStatus()
         checkNfcStatus()
         updateUI()
+        refreshWellbeingAsync()
 
+        FocusNotificationListenerService.syncSummaryNotification(this)
         nfcAdapter?.enableForegroundDispatch(this, pendingIntent, null, null)
     }
 
     override fun onPause() {
         isResumed = false
+        uiHandler.removeCallbacks(uiTickRunnable)
+        notifStore.removeListener(notifStoreListener)
         super.onPause()
         nfcAdapter?.disableForegroundDispatch(this)
+    }
+
+    override fun onDestroy() {
+        uiHandler.removeCallbacks(uiTickRunnable)
+        wellbeingExecutor.shutdownNow()
+        super.onDestroy()
     }
 
     private fun requestNotificationPermissionIfNeeded() {
@@ -112,7 +229,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val infoText = TextView(this).apply {
-            text = "Bem-vindo ao FocusLock! Antes de começar, defina sua Senha Mestre alfanumérica (pode conter letras, números e símbolos, mínimo de 4 caracteres)."
+            text = "Bem-vindo ao FocusLock Super App! Antes de começar, defina sua Senha Mestre alfanumérica (mínimo de 4 caracteres)."
             setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
             textSize = 13f
         }
@@ -217,7 +334,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun checkNfcStatus() {
         nfcAdapter?.let {
-            if (!it.isEnabled) {
+            if (!it.isEnabled && prefs.getNfcTags().isNotEmpty()) {
                 Toast.makeText(this, "NFC desligado. Ative nas configurações para usar sua tag.", Toast.LENGTH_SHORT).show()
             }
         }
@@ -264,16 +381,19 @@ class MainActivity : AppCompatActivity() {
             if (prefs.isBlockingCurrentlyActive()) {
                 val hadSchedule = prefs.isAnyScheduleActiveNow()
                 prefs.isManualLockActive = false
+                prefs.stopTimedFocus()
                 if (hadSchedule) {
                     prefs.snoozeSchedulesForMinutes(15)
                 }
                 AppBlockerService.onUnlocked()
+                FocusNotificationListenerService.syncSummaryNotification(this)
                 Toast.makeText(this, "Modo Foco Desativado via $tagName!", Toast.LENGTH_SHORT).show()
             } else {
                 if (!ensureAccessibilityBeforeLock()) return
                 prefs.isManualLockActive = true
                 AppBlockerService.ensureRunning(this)
                 AppBlockerService.notifyStateChanged()
+                FocusNotificationListenerService.syncSummaryNotification(this)
                 Toast.makeText(this, "Modo Foco Ativado via $tagName!", Toast.LENGTH_SHORT).show()
             }
             updateUI()
@@ -287,9 +407,10 @@ class MainActivity : AppCompatActivity() {
             override fun onTabSelected(tab: TabLayout.Tab?) {
                 val pos = tab?.position ?: 0
                 binding.llTabFocus.visibility = if (pos == 0) View.VISIBLE else View.GONE
-                binding.llTabSchedules.visibility = if (pos == 1) View.VISIBLE else View.GONE
-                binding.llTabStrictness.visibility = if (pos == 2) View.VISIBLE else View.GONE
-                binding.llTabSettings.visibility = if (pos == 3) View.VISIBLE else View.GONE
+                binding.llTabNotifFilter.visibility = if (pos == 1) View.VISIBLE else View.GONE
+                binding.llTabSchedules.visibility = if (pos == 2) View.VISIBLE else View.GONE
+                binding.llTabStrictness.visibility = if (pos == 3) View.VISIBLE else View.GONE
+                binding.llTabSettings.visibility = if (pos == 4) View.VISIBLE else View.GONE
                 binding.scrollViewMain.scrollTo(0, 0)
             }
 
@@ -306,7 +427,7 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle("Permissão de Acesso ao Uso Necessária")
                 .setMessage(
-                    "Para que o FocusLock identifique qual app está aberto (sem usar Acessibilidade e sem conflitar com o Nubank/bancos), ative o \"FocusLock\" em Acesso ao Uso."
+                    "Para que o FocusLock identifique qual app está aberto e calcule seu tempo de tela (sem usar Acessibilidade e sem conflitar com bancos), ative o \"FocusLock\" em Acesso ao Uso."
                 )
                 .setPositiveButton("Abrir Acesso ao Uso") { _, _ ->
                     try {
@@ -329,7 +450,7 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle("Permissão de Sobreposição Necessária")
                 .setMessage(
-                    "Ative a permissão \"Sobrepor a outros apps\" para que a tela de bloqueio possa aparecer imediatamente quando um app restrito for aberto."
+                    "Ative \"Sobrepor a outros apps\" para que a tela de bloqueio apareça instantaneamente quando um app restrito for aberto."
                 )
                 .setPositiveButton("Permitir Sobreposição") { _, _ ->
                     try {
@@ -352,20 +473,181 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
+    private fun promptNotificationListenerPermission() {
+        AlertDialog.Builder(this)
+            .setTitle("Ativar Filtro de Notificações")
+            .setMessage(
+                "Para interceptar e silenciar as notificações dos apps selecionados (mostrando apenas \"X notificações filtradas\", como no Minimalist Phone), ative o FocusLock em Acesso a Notificações."
+            )
+            .setPositiveButton("Abrir Configurações") { _, _ ->
+                try {
+                    startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                } catch (_: Exception) {
+                }
+            }
+            .setNegativeButton("Depois", null)
+            .show()
+    }
+
+    private fun launchAppPicker(
+        mode: String,
+        title: String,
+        subtitle: String,
+        initialSelected: Set<String>,
+        allowEmptyMeansAll: Boolean,
+        emptyButtonLabel: String,
+        includeWhatsApp: Boolean
+    ) {
+        val intent = Intent(this, AppPickerActivity::class.java).apply {
+            putExtra(AppPickerActivity.EXTRA_PICKER_MODE, mode)
+            putExtra(AppPickerActivity.EXTRA_TITLE, title)
+            putExtra(AppPickerActivity.EXTRA_SUBTITLE, subtitle)
+            putStringArrayListExtra(AppPickerActivity.EXTRA_INITIAL_SELECTED, ArrayList(initialSelected))
+            putExtra(AppPickerActivity.EXTRA_ALLOW_EMPTY_MEANS_ALL, allowEmptyMeansAll)
+            putExtra(AppPickerActivity.EXTRA_EMPTY_BUTTON_LABEL, emptyButtonLabel)
+            putExtra(AppPickerActivity.EXTRA_INCLUDE_WHATSAPP, includeWhatsApp)
+        }
+        appPickerLauncher.launch(intent)
+    }
+
     private fun setupListeners() {
+        binding.tvHeaderFilteredPill.setOnClickListener {
+            startActivity(Intent(this, FilteredNotificationsActivity::class.java))
+        }
+
         binding.btnToggleLock.setOnClickListener {
             if (prefs.isBlockingCurrentlyActive()) {
+                if (prefs.isTimedFocusActive() && prefs.isMonkModeOnTimerEnabled) {
+                    val remMins = (prefs.getTimedFocusRemainingMillis() / 60_000L) + 1L
+                    AlertDialog.Builder(this)
+                        .setTitle("🧘 Modo Monge Inquebrável Ativo")
+                        .setMessage(
+                            "A Senha Mestre está desabilitada até o fim desta sessão com timer (faltam cerca de $remMins min).\n\nAproxime sua Tag NFC física caso precise desbloquear antes."
+                        )
+                        .setPositiveButton("Manter o Foco", null)
+                        .show()
+                    return@setOnClickListener
+                }
                 promptPinToUnlock()
             } else {
                 if (!ensureAccessibilityBeforeLock()) return@setOnClickListener
                 prefs.isManualLockActive = true
                 AppBlockerService.ensureRunning(this)
                 AppBlockerService.notifyStateChanged()
+                FocusNotificationListenerService.syncSummaryNotification(this)
                 Toast.makeText(this, "Bloqueio ativado com sucesso!", Toast.LENGTH_SHORT).show()
                 updateUI()
             }
         }
 
+        // Sessões Rápidas com Timer (Pomodoro)
+        binding.btnTimer25m.setOnClickListener { startQuickTimedSession(25) }
+        binding.btnTimer45m.setOnClickListener { startQuickTimedSession(45) }
+        binding.btnTimer60m.setOnClickListener { startQuickTimedSession(60) }
+        binding.btnTimerCustom.setOnClickListener { showCustomTimerDialog() }
+
+        binding.btnRefreshUsageStats.setOnClickListener {
+            refreshWellbeingAsync()
+            Toast.makeText(this, "Tempo de tela atualizado!", Toast.LENGTH_SHORT).show()
+        }
+
+        // Aba 2: Filtro de Notificações (Minimalist Phone)
+        binding.btnEnableNotifListener.setOnClickListener {
+            try {
+                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            } catch (_: Exception) {
+            }
+        }
+
+        binding.switchNotifFilter.setOnClickListener {
+            val target = binding.switchNotifFilter.isChecked
+            if (target && !FocusNotificationListenerService.isNotificationAccessEnabled(this)) {
+                binding.switchNotifFilter.isChecked = false
+                promptNotificationListenerPermission()
+                return@setOnClickListener
+            }
+            prefs.isNotificationFilterEnabled = target
+            FocusNotificationListenerService.syncSummaryNotification(this)
+            AppBlockerService.notifyStateChanged()
+            updateUI()
+            if (target && prefs.getFilteredNotificationPackages().isEmpty()) {
+                Toast.makeText(this, "Escolha abaixo quais aplicativos terão as notificações filtradas!", Toast.LENGTH_LONG).show()
+            }
+        }
+
+        binding.btnOpenFilteredInbox.setOnClickListener {
+            startActivity(Intent(this, FilteredNotificationsActivity::class.java))
+        }
+
+        binding.btnSelectFilteredNotifApps.setOnClickListener {
+            launchAppPicker(
+                mode = AppPickerActivity.MODE_NOTIFICATION_FILTER,
+                title = "Filtro de Notificações",
+                subtitle = "Apps selecionados serão silenciados em \"X notificações filtradas\"",
+                initialSelected = prefs.getFilteredNotificationPackages(),
+                allowEmptyMeansAll = false,
+                emptyButtonLabel = "Limpar Tudo",
+                includeWhatsApp = true
+            )
+        }
+
+        binding.btnNotifFilterMode.setOnClickListener {
+            val options = arrayOf(
+                "Sempre Ativo — 24h por dia (Estilo Minimalist Phone)",
+                "Apenas Durante o Modo Foco / Horários Ativos"
+            )
+            val values = arrayOf(
+                BlockPreferences.NOTIF_MODE_ALWAYS,
+                BlockPreferences.NOTIF_MODE_ONLY_DURING_FOCUS
+            )
+            val currentIdx = values.indexOf(prefs.notificationFilterMode).coerceAtLeast(0)
+            AlertDialog.Builder(this)
+                .setTitle("Quando Filtrar Notificações?")
+                .setSingleChoiceItems(options, currentIdx) { dialog, which ->
+                    prefs.notificationFilterMode = values[which]
+                    FocusNotificationListenerService.syncSummaryNotification(this)
+                    updateUI()
+                    dialog.dismiss()
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
+        }
+
+        binding.btnFloatingPillMode.setOnClickListener {
+            val options = arrayOf(
+                "Apenas na Tela Inicial (Estilo Minimalist Phone)",
+                "Em Qualquer Tela (Pílula Flutuante Global)",
+                "Desativada (Mostrar só na Barra de Notificações)"
+            )
+            val values = arrayOf(
+                BlockPreferences.PILL_MODE_HOME_ONLY,
+                BlockPreferences.PILL_MODE_ALWAYS,
+                BlockPreferences.PILL_MODE_OFF
+            )
+            val currentIdx = values.indexOf(prefs.floatingPillMode).coerceAtLeast(0)
+            AlertDialog.Builder(this)
+                .setTitle("Exibição da Pílula \"X notificações filtradas\"")
+                .setSingleChoiceItems(options, currentIdx) { dialog, which ->
+                    prefs.floatingPillMode = values[which]
+                    if (values[which] != BlockPreferences.PILL_MODE_OFF && !Settings.canDrawOverlays(this)) {
+                        Toast.makeText(this, "Ative a Sobreposição de Tela para exibir a pílula flutuante.", Toast.LENGTH_LONG).show()
+                    }
+                    AppBlockerService.ensureRunning(this)
+                    AppBlockerService.refreshFloatingFilterPill()
+                    updateUI()
+                    dialog.dismiss()
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
+        }
+
+        binding.btnClearRecentFiltered.setOnClickListener {
+            notifStore.clearAll()
+            FocusNotificationListenerService.syncSummaryNotification(this)
+            updateNotificationFilterUI()
+        }
+
+        // Permissões & Ajustes
         binding.btnRegisterNfc.setOnClickListener {
             if (nfcAdapter == null) {
                 Toast.makeText(this, "Este aparelho não possui leitor NFC.", Toast.LENGTH_SHORT).show()
@@ -426,15 +708,96 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnSelectApps.setOnClickListener {
+            val openPicker = {
+                launchAppPicker(
+                    mode = AppPickerActivity.MODE_GLOBAL_BLOCK,
+                    title = "Apps Bloqueados (Global)",
+                    subtitle = "Filtre por categoria ou ordene por tempo de tela e tamanho",
+                    initialSelected = prefs.getBlockedPackages(),
+                    allowEmptyMeansAll = true,
+                    emptyButtonLabel = "Bloquear Todos",
+                    includeWhatsApp = false
+                )
+            }
             if (prefs.isBlockingCurrentlyActive()) {
                 verifyPasswordThen("Insira a Senha Mestre para alterar a lista de apps bloqueados:") {
-                    showSelectAppsDialog()
+                    openPicker()
                 }
             } else {
-                showSelectAppsDialog()
+                openPicker()
             }
         }
 
+        // Limite Diário de Tempo por App
+        binding.switchDailyTimeLimit.setOnClickListener {
+            val target = binding.switchDailyTimeLimit.isChecked
+            if (!target && (prefs.isBlockingCurrentlyActive() || prefs.isDailyTimeLimitEnabled)) {
+                binding.switchDailyTimeLimit.isChecked = true
+                verifyPasswordThen("Insira a Senha Mestre para desativar o Limite Diário de Tempo:") {
+                    prefs.isDailyTimeLimitEnabled = false
+                    AppBlockerService.notifyStateChanged()
+                    updateUI()
+                }
+            } else if (target) {
+                if (!ensureAccessibilityBeforeLock()) {
+                    binding.switchDailyTimeLimit.isChecked = false
+                    return@setOnClickListener
+                }
+                prefs.isDailyTimeLimitEnabled = true
+                AppBlockerService.notifyStateChanged()
+                updateUI()
+                if (prefs.getTimeLimitedPackages().isEmpty()) {
+                    Toast.makeText(this, "Toque em \"Escolher Apps\" para definir quais apps terão limite diário!", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+
+        binding.btnSelectTimeLimitApps.setOnClickListener {
+            val openPicker = {
+                launchAppPicker(
+                    mode = AppPickerActivity.MODE_DAILY_TIME_LIMIT,
+                    title = "Apps com Limite Diário de Tempo",
+                    subtitle = "Serão bloqueados ao atingir ${prefs.dailyTimeLimitMinutes} min de uso no dia",
+                    initialSelected = prefs.getTimeLimitedPackages(),
+                    allowEmptyMeansAll = false,
+                    emptyButtonLabel = "Limpar Tudo",
+                    includeWhatsApp = false
+                )
+            }
+            if (prefs.isBlockingCurrentlyActive()) {
+                verifyPasswordThen("Insira a Senha Mestre para editar os apps com limite de tempo:") {
+                    openPicker()
+                }
+            } else {
+                openPicker()
+            }
+        }
+
+        binding.btnConfigureTimeLimitMins.setOnClickListener {
+            val action = {
+                val options = arrayOf("15 minutos/dia", "30 minutos/dia", "45 minutos/dia", "60 minutos (1h)/dia", "90 minutos (1h30)/dia", "120 minutos (2h)/dia")
+                val vals = intArrayOf(15, 30, 45, 60, 90, 120)
+                val currIdx = vals.indexOf(prefs.dailyTimeLimitMinutes).coerceAtLeast(1)
+                AlertDialog.Builder(this)
+                    .setTitle("Tempo Máximo Diário por App")
+                    .setSingleChoiceItems(options, currIdx) { dialog, which ->
+                        prefs.dailyTimeLimitMinutes = vals[which]
+                        prefs.timeLimitSnoozeUntilMillis = 0L
+                        AppBlockerService.notifyStateChanged()
+                        updateUI()
+                        dialog.dismiss()
+                    }
+                    .setNegativeButton("Cancelar", null)
+                    .show()
+            }
+            if (prefs.isBlockingCurrentlyActive()) {
+                verifyPasswordThen("Insira a Senha Mestre para alterar o limite de tempo:") { action() }
+            } else {
+                action()
+            }
+        }
+
+        // Aba 4: Rigor
         binding.btnChangeStrictnessMode.setOnClickListener {
             if (prefs.isBlockingCurrentlyActive()) {
                 verifyPasswordThen("Insira a Senha Mestre para alterar o Nível de Rigor durante o bloqueio:") {
@@ -443,6 +806,21 @@ class MainActivity : AppCompatActivity() {
             } else {
                 showStrictnessModeDialog()
             }
+        }
+
+        binding.switchMonkModeTimer.setOnClickListener {
+            val target = binding.switchMonkModeTimer.isChecked
+            if (!target && prefs.isTimedFocusActive()) {
+                binding.switchMonkModeTimer.isChecked = true
+                Toast.makeText(this, "O Modo Monge não pode ser desligado durante uma sessão com timer ativa!", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            prefs.isMonkModeOnTimerEnabled = target
+            Toast.makeText(
+                this,
+                if (target) "Modo Monge ativado para sessões com timer!" else "Modo Monge desativado.",
+                Toast.LENGTH_SHORT
+            ).show()
         }
 
         binding.switchAntiTamper.setOnClickListener {
@@ -514,6 +892,355 @@ class MainActivity : AppCompatActivity() {
                 }
             } else {
                 showConfigureDailyBudgetDialog()
+            }
+        }
+
+        // Backup & Restauração
+        binding.btnExportBackup.setOnClickListener {
+            val json = prefs.exportBackupJson()
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("FocusLock Backup JSON", json))
+            Toast.makeText(this, "Backup JSON copiado para a área de transferência!", Toast.LENGTH_LONG).show()
+        }
+
+        binding.btnImportBackup.setOnClickListener {
+            if (prefs.isBlockingCurrentlyActive()) {
+                verifyPasswordThen("Insira a Senha Mestre para importar um backup durante o bloqueio:") {
+                    showImportBackupDialog()
+                }
+            } else {
+                showImportBackupDialog()
+            }
+        }
+    }
+
+    private fun startQuickTimedSession(minutes: Int) {
+        if (!ensureAccessibilityBeforeLock()) return
+        prefs.startTimedFocusMinutes(minutes)
+        AppBlockerService.ensureRunning(this)
+        AppBlockerService.notifyStateChanged()
+        FocusNotificationListenerService.syncSummaryNotification(this)
+        Toast.makeText(
+            this,
+            "⏳ Sessão de foco iniciada por $minutes min!",
+            Toast.LENGTH_SHORT
+        ).show()
+        updateUI()
+    }
+
+    private fun showCustomTimerDialog() {
+        val options = arrayOf(
+            "15 minutos (Sprint curto)",
+            "25 minutos (Pomodoro clássico)",
+            "45 minutos (Deep Work)",
+            "60 minutos (1 hora)",
+            "90 minutos (1h 30m)",
+            "120 minutos (2 horas)",
+            "180 minutos (3 horas)"
+        )
+        val mins = intArrayOf(15, 25, 45, 60, 90, 120, 180)
+        AlertDialog.Builder(this)
+            .setTitle("Iniciar Sessão de Foco com Timer")
+            .setItems(options) { _, which ->
+                startQuickTimedSession(mins[which])
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun showImportBackupDialog() {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clipText = clipboard.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()?.trim() ?: ""
+
+        val input = EditText(this).apply {
+            hint = "Cole aqui o JSON de backup do FocusLock..."
+            minLines = 5
+            maxLines = 10
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+            textSize = 12f
+            if (clipText.startsWith("{") && clipText.contains("strictnessMode")) {
+                setText(clipText)
+            }
+        }
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = dpToPx(20)
+            setPadding(pad, dpToPx(12), pad, dpToPx(4))
+            addView(input)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Importar Backup JSON")
+            .setView(container)
+            .setPositiveButton("Restaurar") { _, _ ->
+                val raw = input.text?.toString()?.trim() ?: ""
+                if (prefs.importBackupJson(raw)) {
+                    AppBlockerService.notifyStateChanged()
+                    FocusNotificationListenerService.syncSummaryNotification(this)
+                    updateUI()
+                    refreshWellbeingAsync()
+                    Toast.makeText(this, "Configurações restauradas com sucesso!", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(this, "JSON inválido. Verifique o conteúdo colado.", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun refreshWellbeingAsync() {
+        if (!AppBlockerService.isServiceEnabled(this)) {
+            binding.tvKpiScreenTime.text = "—"
+            binding.llTopUsageContainer.removeAllViews()
+            val hint = TextView(this).apply {
+                text = "Ative o Acesso ao Uso para visualizar seu tempo de tela e o ranking de apps."
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+                textSize = 12f
+            }
+            binding.llTopUsageContainer.addView(hint)
+            return
+        }
+
+        wellbeingExecutor.execute {
+            val (totalMs, topApps) = AppMetadataHelper.queryTodayDashboardSummary(
+                context = applicationContext,
+                prefs = prefs,
+                topLimit = 5
+            )
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                binding.tvKpiScreenTime.text = AppMetadataHelper.formatDuration(totalMs)
+                renderTopUsageApps(topApps, totalMs)
+            }
+        }
+    }
+
+    private fun renderTopUsageApps(topApps: List<TopAppUsageSummary>, totalMs: Long) {
+        binding.llTopUsageContainer.removeAllViews()
+        if (topApps.isEmpty()) {
+            val emptyTv = TextView(this).apply {
+                text = "Nenhum uso significativo registrado hoje até o momento."
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+                textSize = 12f
+            }
+            binding.llTopUsageContainer.addView(emptyTv)
+            return
+        }
+
+        val maxMs = topApps.maxOf { it.usageTodayMs }.coerceAtLeast(1L)
+
+        topApps.forEachIndexed { idx, app ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                val vPad = dpToPx(6)
+                setPadding(0, vPad, 0, vPad)
+                if (idx > 0) {
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { topMargin = dpToPx(2) }
+                }
+            }
+
+            val iconView = ImageView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(dpToPx(30), dpToPx(30))
+                val drawable = try {
+                    packageManager.getApplicationIcon(app.packageName)
+                } catch (_: Exception) {
+                    ContextCompat.getDrawable(this@MainActivity, R.drawable.ic_focus_shield)
+                }
+                setImageDrawable(drawable)
+            }
+
+            val midCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginStart = dpToPx(10)
+                    marginEnd = dpToPx(8)
+                }
+            }
+
+            val pct = if (totalMs > 0L) ((app.usageTodayMs * 100L) / totalMs).coerceIn(1L, 100L) else 0L
+            val titleRow = TextView(this).apply {
+                text = "${app.label}  •  ${AppMetadataHelper.formatDuration(app.usageTodayMs)} (${pct}%)"
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+                textSize = 12.5f
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            }
+
+            val barRatio = (app.usageTodayMs.toFloat() / maxMs.toFloat()).coerceIn(0.08f, 1.0f)
+            val barTrack = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    dpToPx(5)
+                ).apply { topMargin = dpToPx(4) }
+                setBackgroundColor(Color.parseColor("#252A3A"))
+                weightSum = 1f
+            }
+            val barFill = View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, barRatio)
+                background = GradientDrawable().apply {
+                    cornerRadius = dpToPx(3).toFloat()
+                    setColor(
+                        ContextCompat.getColor(
+                            this@MainActivity,
+                            if (app.isCurrentlyInGlobalBlock) R.color.accent_red else R.color.accent_blue
+                        )
+                    )
+                }
+            }
+            barTrack.addView(barFill)
+            midCol.addView(titleRow)
+            midCol.addView(barTrack)
+
+            row.addView(iconView)
+            row.addView(midCol)
+
+            if (!app.isAlwaysAllowed) {
+                val quickBtn = MaterialButton(
+                    this,
+                    null,
+                    com.google.android.material.R.attr.materialButtonOutlinedStyle
+                ).apply {
+                    val isExplicitGlobal = prefs.getBlockedPackages().contains(app.packageName)
+                    val isBlocked = app.isCurrentlyInGlobalBlock
+                    text = if (isBlocked) "Restrito" else "+ Bloquear"
+                    isAllCaps = false
+                    textSize = 10.5f
+                    minHeight = dpToPx(30)
+                    minimumHeight = dpToPx(30)
+                    minWidth = 0
+                    minimumWidth = 0
+                    insetTop = 0
+                    insetBottom = 0
+                    setPadding(dpToPx(8), 0, dpToPx(8), 0)
+                    val colorRes = if (isBlocked) R.color.accent_red else R.color.accent_blue
+                    setTextColor(ContextCompat.getColor(this@MainActivity, colorRes))
+                    strokeColor = ContextCompat.getColorStateList(this@MainActivity, colorRes)
+
+                    setOnClickListener {
+                        val currentSet = prefs.getBlockedPackages().toMutableSet()
+                        if (isExplicitGlobal) {
+                            val removeAction = {
+                                currentSet.remove(app.packageName)
+                                prefs.saveBlockedPackages(currentSet)
+                                AppBlockerService.notifyStateChanged()
+                                updateUI()
+                                refreshWellbeingAsync()
+                            }
+                            if (prefs.isBlockingCurrentlyActive()) {
+                                verifyPasswordThen("Digite a Senha Mestre para remover ${app.label} do bloqueio:") {
+                                    removeAction()
+                                }
+                            } else {
+                                removeAction()
+                            }
+                        } else if (!isBlocked) {
+                            currentSet.add(app.packageName)
+                            prefs.saveBlockedPackages(currentSet)
+                            AppBlockerService.notifyStateChanged()
+                            Toast.makeText(this@MainActivity, "${app.label} adicionado ao bloqueio!", Toast.LENGTH_SHORT).show()
+                            updateUI()
+                            refreshWellbeingAsync()
+                        } else {
+                            // Lista global vazia significa "Todos os apps bloqueados"
+                            Toast.makeText(this@MainActivity, "Já está incluído em 'Todos os apps bloqueados'.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+                row.addView(quickBtn)
+            }
+
+            binding.llTopUsageContainer.addView(row)
+        }
+    }
+
+    private fun updateNotificationFilterUI() {
+        val isListenerEnabled = FocusNotificationListenerService.isNotificationAccessEnabled(this)
+        binding.cardNotifListenerWarning.visibility = if (isListenerEnabled) View.GONE else View.VISIBLE
+        binding.switchNotifFilter.isChecked = prefs.isNotificationFilterEnabled && isListenerEnabled
+
+        val activeFilteredItems = notifStore.getNotifications()
+        val count = activeFilteredItems.size
+        binding.btnOpenFilteredInbox.text = "📬 ABRIR CAIXA FILTRADA ($count)"
+
+        if (prefs.isNotificationFilterEnabled && count > 0) {
+            binding.tvHeaderFilteredPill.visibility = View.VISIBLE
+            binding.tvHeaderFilteredPill.text = if (count == 1) "🔕 1 filtrada" else "🔕 $count filtradas"
+        } else {
+            binding.tvHeaderFilteredPill.visibility = View.GONE
+        }
+
+        val selectedAppsCount = prefs.getFilteredNotificationPackages().size
+        binding.tvFilteredAppsCountSummary.text = if (selectedAppsCount == 0) {
+            "Apps no filtro: Nenhum app selecionado (toque abaixo para escolher)"
+        } else {
+            "Apps no filtro: $selectedAppsCount aplicativo(s) silenciado(s)"
+        }
+
+        binding.btnNotifFilterMode.text = if (prefs.notificationFilterMode == BlockPreferences.NOTIF_MODE_ONLY_DURING_FOCUS) {
+            "Quando filtrar: Apenas Durante o Modo Foco"
+        } else {
+            "Quando filtrar: Sempre Ativo — 24h (Minimalist Phone)"
+        }
+
+        binding.btnFloatingPillMode.text = when (prefs.floatingPillMode) {
+            BlockPreferences.PILL_MODE_ALWAYS -> "Pílula Flutuante: Em Qualquer Tela"
+            BlockPreferences.PILL_MODE_OFF -> "Pílula Flutuante: Só na Barra de Notificações"
+            else -> "Pílula Flutuante: Apenas na Tela Inicial"
+        }
+
+        binding.btnClearRecentFiltered.visibility = if (count > 0) View.VISIBLE else View.GONE
+        binding.llRecentFilteredContainer.removeAllViews()
+
+        if (activeFilteredItems.isEmpty()) {
+            val emptyTv = TextView(this).apply {
+                text = "Nenhuma notificação pendente na caixa filtrada."
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+                textSize = 12f
+            }
+            binding.llRecentFilteredContainer.addView(emptyTv)
+        } else {
+            activeFilteredItems.take(5).forEachIndexed { idx, item ->
+                val itemView = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setBackgroundColor(Color.parseColor("#0F111A"))
+                    val pad = dpToPx(10)
+                    setPadding(pad, dpToPx(8), pad, dpToPx(8))
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        if (idx > 0) topMargin = dpToPx(6)
+                    }
+                    setOnClickListener {
+                        startActivity(Intent(this@MainActivity, FilteredNotificationsActivity::class.java))
+                    }
+                }
+
+                val clock = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
+                val topLine = TextView(this).apply {
+                    text = "${item.appName} • $clock"
+                    setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accent_blue))
+                    textSize = 11f
+                    setTypeface(typeface, Typeface.BOLD)
+                }
+                val bodyLine = TextView(this).apply {
+                    val summary = if (item.text.isNotBlank()) "${item.title}: ${item.text}" else item.title
+                    text = summary
+                    setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+                    textSize = 12.5f
+                    maxLines = 2
+                    ellipsize = TextUtils.TruncateAt.END
+                }
+                itemView.addView(topLine)
+                itemView.addView(bodyLine)
+                binding.llRecentFilteredContainer.addView(itemView)
             }
         }
     }
@@ -744,7 +1471,7 @@ class MainActivity : AppCompatActivity() {
 
         if (schedules.isEmpty()) {
             val emptyTv = TextView(this).apply {
-                text = "Nenhum bloco de horário configurado. Toque em \"+ Novo Horário\" para criar."
+                text = "Nenhum bloco de horário configurado. Toque em \"+ Novo Bloco de Horário\" para criar."
                 setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
                 textSize = 13f
                 setPadding(0, dpToPx(8), 0, dpToPx(8))
@@ -811,7 +1538,6 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener {
                     val targetState = isChecked
                     if (!targetState && schedule.isActiveNow() && !prefs.isScheduleSnoozed()) {
-                        // Reverte visualmente até digitar a senha
                         isChecked = true
                         verifyPasswordThen("Este bloco está ativo agora. Digite a Senha Mestre para desativá-lo:") {
                             updateScheduleEnabled(schedule.id, false)
@@ -876,6 +1602,7 @@ class MainActivity : AppCompatActivity() {
                     val deleteAction = {
                         val updated = prefs.getSchedules().filterNot { it.id == schedule.id }
                         prefs.saveSchedules(updated)
+                        AppBlockerService.notifyStateChanged()
                         Toast.makeText(this@MainActivity, "Horário removido.", Toast.LENGTH_SHORT).show()
                         updateUI()
                     }
@@ -910,6 +1637,7 @@ class MainActivity : AppCompatActivity() {
             prefs.saveSchedules(list)
             AppBlockerService.ensureRunning(this)
             AppBlockerService.notifyStateChanged()
+            FocusNotificationListenerService.syncSummaryNotification(this)
             Toast.makeText(
                 this,
                 if (enabled) "Bloco de horário ativado!" else "Bloco de horário desativado.",
@@ -995,20 +1723,32 @@ class MainActivity : AppCompatActivity() {
             ).apply {
                 topMargin = dpToPx(10)
             }
+            isAllCaps = false
             setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accent_blue))
             text = if (selectedCustomApps.isEmpty()) {
-                "Apps deste Horário: Lista Global"
+                "📱 Apps deste Horário: Lista Global"
             } else {
-                "Apps deste Horário: ${selectedCustomApps.size} selecionado(s)"
+                "📱 Apps deste Horário: ${selectedCustomApps.size} selecionado(s)"
             }
             setOnClickListener {
-                showScheduleCustomAppsPicker(selectedCustomApps) {
+                pendingScheduleAppsCallback = { picked ->
+                    selectedCustomApps.clear()
+                    selectedCustomApps.addAll(picked)
                     text = if (selectedCustomApps.isEmpty()) {
-                        "Apps deste Horário: Lista Global"
+                        "📱 Apps deste Horário: Lista Global"
                     } else {
-                        "Apps deste Horário: ${selectedCustomApps.size} selecionado(s)"
+                        "📱 Apps deste Horário: ${selectedCustomApps.size} selecionado(s)"
                     }
                 }
+                launchAppPicker(
+                    mode = AppPickerActivity.MODE_SCHEDULE_BLOCK,
+                    title = "Apps deste Bloco de Horário",
+                    subtitle = "Deixe em 'Lista Global' ou escolha apps específicos para este horário",
+                    initialSelected = selectedCustomApps,
+                    allowEmptyMeansAll = true,
+                    emptyButtonLabel = "Usar Lista Global",
+                    includeWhatsApp = false
+                )
             }
         }
         container.addView(btnScheduleApps)
@@ -1080,6 +1820,7 @@ class MainActivity : AppCompatActivity() {
                 prefs.scheduleSnoozeUntilMillis = 0L
                 prefs.saveSchedules(currentList)
                 AppBlockerService.notifyStateChanged()
+                FocusNotificationListenerService.syncSummaryNotification(this)
                 Toast.makeText(this, "Bloco de horário salvo!", Toast.LENGTH_SHORT).show()
                 dialog.dismiss()
                 updateUI()
@@ -1093,101 +1834,11 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun showScheduleCustomAppsPicker(targetSet: MutableSet<String>, onUpdated: () -> Unit) {
-        val pm = packageManager
-        val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
-            addCategory(Intent.CATEGORY_LAUNCHER)
-        }
-
-        val launchables = pm.queryIntentActivities(mainIntent, 0)
-            .mapNotNull { it.activityInfo?.applicationInfo }
-            .distinctBy { it.packageName }
-            .filter { app -> !prefs.isAlwaysAllowed(app.packageName) }
-            .sortedBy { pm.getApplicationLabel(it).toString().lowercase() }
-
-        if (launchables.isEmpty()) {
-            Toast.makeText(this, "Nenhum aplicativo encontrado.", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val appNames = launchables.map { pm.getApplicationLabel(it).toString() }.toTypedArray()
-        val tempSet = targetSet.toMutableSet()
-        val checkedItems = launchables.map { tempSet.contains(it.packageName) }.toBooleanArray()
-
-        AlertDialog.Builder(this)
-            .setTitle("Apps Específicos deste Horário")
-            .setMultiChoiceItems(appNames, checkedItems) { _, which, isChecked ->
-                val pkg = launchables[which].packageName
-                if (isChecked) tempSet.add(pkg) else tempSet.remove(pkg)
-            }
-            .setPositiveButton("Confirmar") { _, _ ->
-                targetSet.clear()
-                targetSet.addAll(tempSet)
-                onUpdated()
-            }
-            .setNeutralButton("Usar Lista Global") { _, _ ->
-                targetSet.clear()
-                onUpdated()
-            }
-            .setNegativeButton("Cancelar", null)
-            .show()
-    }
-
-    private fun showSelectAppsDialog() {
-        val pm = packageManager
-        val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
-            addCategory(Intent.CATEGORY_LAUNCHER)
-        }
-
-        val launchables = pm.queryIntentActivities(mainIntent, 0)
-            .mapNotNull { it.activityInfo?.applicationInfo }
-            .distinctBy { it.packageName }
-            .filter { app -> !prefs.isAlwaysAllowed(app.packageName) }
-            .sortedBy { pm.getApplicationLabel(it).toString().lowercase() }
-
-        if (launchables.isEmpty()) {
-            Toast.makeText(this, "Nenhum aplicativo bloqueável encontrado.", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val appNames = launchables.map { pm.getApplicationLabel(it).toString() }.toTypedArray()
-        val currentBlocked = prefs.getBlockedPackages().toMutableSet()
-        val checkedItems = launchables.map { currentBlocked.contains(it.packageName) }.toBooleanArray()
-
-        AlertDialog.Builder(this)
-            .setTitle("Escolher Apps para Bloquear")
-            .setMultiChoiceItems(appNames, checkedItems) { _, which, isChecked ->
-                val pkg = launchables[which].packageName
-                if (isChecked) {
-                    currentBlocked.add(pkg)
-                } else {
-                    currentBlocked.remove(pkg)
-                }
-            }
-            .setPositiveButton("Salvar Seleção") { _, _ ->
-                prefs.saveBlockedPackages(currentBlocked)
-                val count = currentBlocked.size
-                val msg = if (count == 0) {
-                    "Configurado para bloquear TODOS os apps (exceto WhatsApp)."
-                } else {
-                    "$count aplicativo(s) selecionado(s) para bloqueio."
-                }
-                Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
-                updateUI()
-            }
-            .setNeutralButton("Bloquear Todos") { _, _ ->
-                prefs.saveBlockedPackages(emptySet())
-                Toast.makeText(this, "Todos os apps (exceto WhatsApp) serão bloqueados.", Toast.LENGTH_SHORT).show()
-                updateUI()
-            }
-            .setNegativeButton("Cancelar", null)
-            .show()
-    }
-
     private fun promptPinToUnlock() {
         verifyPasswordThen("Insira sua Senha Mestre alfanumérica para liberar os aplicativos:") {
             val hadSchedule = prefs.isAnyScheduleActiveNow()
             prefs.isManualLockActive = false
+            prefs.stopTimedFocus()
             if (hadSchedule) {
                 val options = arrayOf(
                     "1 minuto (Olhada rápida - ScreenZen)",
@@ -1202,6 +1853,7 @@ class MainActivity : AppCompatActivity() {
                         val mins = minutesValues[which]
                         prefs.snoozeSchedulesForMinutes(mins)
                         AppBlockerService.onUnlocked()
+                        FocusNotificationListenerService.syncSummaryNotification(this)
                         Toast.makeText(
                             this,
                             "Desbloqueado! (Horários pausados por $mins min)",
@@ -1212,6 +1864,7 @@ class MainActivity : AppCompatActivity() {
                     .show()
             } else {
                 AppBlockerService.onUnlocked()
+                FocusNotificationListenerService.syncSummaryNotification(this)
                 Toast.makeText(this, "Desbloqueado com sucesso!", Toast.LENGTH_SHORT).show()
                 updateUI()
             }
@@ -1402,7 +2055,6 @@ class MainActivity : AppCompatActivity() {
         val random = SecureRandom()
 
         val passwordChars = mutableListOf<Char>()
-        // Garantir complexidade (maiúsculas, minúsculas, números e símbolos)
         repeat(3) { passwordChars.add(upper[random.nextInt(upper.length)]) }
         repeat(3) { passwordChars.add(lower[random.nextInt(lower.length)]) }
         repeat(3) { passwordChars.add(digits[random.nextInt(digits.length)]) }
@@ -1412,7 +2064,6 @@ class MainActivity : AppCompatActivity() {
             passwordChars.add(allChars[random.nextInt(allChars.length)])
         }
 
-        // Embaralhar usando SecureRandom
         for (i in passwordChars.indices.reversed()) {
             val j = random.nextInt(i + 1)
             val tmp = passwordChars[i]
@@ -1431,28 +2082,44 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateUI() {
+        uiHandler.removeCallbacks(uiTickRunnable)
         val isManual = prefs.isManualLockActive
+        val isTimed = prefs.isTimedFocusActive()
         val isScheduleActive = prefs.isAnyScheduleActiveNow()
-        val isLocked = isManual || isScheduleActive
+        val isLocked = isManual || isTimed || isScheduleActive
         val blockedCount = prefs.getBlockedPackages().size
 
         if (isLocked) {
             binding.ivLockStatus.setImageResource(R.drawable.ic_lock)
             binding.ivLockStatus.setColorFilter(ContextCompat.getColor(this, R.color.accent_red))
-            binding.tvLockStatus.text = if (isManual) {
-                "STATUS: BLOQUEIO MANUAL ATIVO"
+            if (isTimed) {
+                val remSec = prefs.getTimedFocusRemainingMillis() / 1000L
+                binding.tvLockStatus.text = String.format(
+                    Locale.US,
+                    "⏳ SESSÃO DE FOCO: %02d:%02d",
+                    remSec / 60L,
+                    remSec % 60L
+                )
+                uiHandler.postDelayed(uiTickRunnable, 1000L)
+            } else if (isManual) {
+                binding.tvLockStatus.text = "STATUS: BLOQUEIO MANUAL ATIVO"
             } else {
-                "STATUS: HORÁRIO DE FOCO ATIVO"
+                binding.tvLockStatus.text = "STATUS: HORÁRIO DE FOCO ATIVO"
             }
             binding.tvLockStatus.setTextColor(ContextCompat.getColor(this, R.color.accent_red))
             binding.tvLockSubtitle.text = if (blockedCount == 0) {
-                "Todos os apps bloqueados (exceto WhatsApp)"
+                "Todos os apps bloqueados (exceto WhatsApp e Bancos)"
             } else {
                 "$blockedCount aplicativo(s) selecionado(s) bloqueado(s)"
             }
-            binding.btnToggleLock.text = "DESBLOQUEAR (EXIGE SENHA MESTRE)"
+            binding.btnToggleLock.text = if (isTimed && prefs.isMonkModeOnTimerEnabled) {
+                "🧘 MODO MONGE ATIVO (SÓ TAG NFC)"
+            } else {
+                "DESBLOQUEAR (EXIGE SENHA MESTRE)"
+            }
             binding.btnToggleLock.backgroundTintList =
                 ContextCompat.getColorStateList(this, R.color.accent_red)
+            binding.llQuickTimersSection.visibility = View.GONE
         } else {
             binding.ivLockStatus.setImageResource(R.drawable.ic_focus_shield)
             binding.ivLockStatus.setColorFilter(ContextCompat.getColor(this, R.color.accent_green))
@@ -1462,6 +2129,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnToggleLock.text = "ATIVAR BLOQUEIO AGORA"
             binding.btnToggleLock.backgroundTintList =
                 ContextCompat.getColorStateList(this, R.color.accent_blue)
+            binding.llQuickTimersSection.visibility = View.VISIBLE
         }
 
         val nfcTags = prefs.getNfcTags()
@@ -1480,16 +2148,29 @@ class MainActivity : AppCompatActivity() {
 
         val todayBlocked = prefs.getBlockedAttemptsToday()
         binding.tvTodayBlockedBadge.text = "🛡️ $todayBlocked tentativa(s) de distração bloqueada(s) hoje"
+        binding.tvKpiBlockedToday.text = todayBlocked.toString()
+        binding.tvKpiFilteredToday.text = notifStore.getFilteredCountToday().toString()
 
+        // Limite Diário de Tempo por App
+        val timeLimitedCount = prefs.getTimeLimitedPackages().size
+        val limitMins = prefs.dailyTimeLimitMinutes
+        binding.switchDailyTimeLimit.isChecked = prefs.isDailyTimeLimitEnabled
+        binding.btnConfigureTimeLimitMins.text = "Limite: ${limitMins}m"
+        binding.tvDailyTimeLimitSummary.text =
+            "Bloqueia após $limitMins min de uso somado no dia ($timeLimitedCount app(s) selecionado(s))"
+
+        // Rigor
         binding.tvStrictnessModeInfo.text = when (prefs.strictnessMode) {
             BlockPreferences.MODE_DEEP_FOCUS_NFC -> "Modo Atual: Deep Focus — Opal/Brick (Exclusivo Tag NFC)"
             BlockPreferences.MODE_MINDFUL_DELAY -> "Modo Atual: Pausa Consciente — ScreenZen (Espera de 15s)"
             else -> "Modo Atual: Normal (Senha Mestre ou NFC imediato)"
         }
+        binding.switchMonkModeTimer.isChecked = prefs.isMonkModeOnTimerEnabled
         binding.switchAntiTamper.isChecked = prefs.isAntiTamperEnabled
         binding.switchCognitiveChallenge.isChecked = prefs.isCognitiveChallengeEnabled
         binding.tvCustomQuotePreview.text = "Frase de foco: \"${prefs.customLockQuote}\""
 
+        // Orçamento Diário
         binding.switchDailyBudget.isChecked = prefs.isDailyBudgetEnabled
         val usedOpens = prefs.getDailyOpensUsedToday()
         val maxOpens = prefs.dailyMaxOpens
@@ -1497,7 +2178,25 @@ class MainActivity : AppCompatActivity() {
         binding.tvDailyBudgetSummary.text =
             "Limite: $maxOpens aberturas/dia • $sessionMins min por sessão (Usado hoje: $usedOpens/$maxOpens)"
 
+        updateNotificationFilterUI()
         renderSchedulesList()
+        updateSystemDiagnosticsCard()
+    }
+
+    private fun updateSystemDiagnosticsCard() {
+        val usageOk = AppBlockerService.isServiceEnabled(this)
+        val overlayOk = Settings.canDrawOverlays(this)
+        val notifOk = FocusNotificationListenerService.isNotificationAccessEnabled(this)
+        val batteryOk = isBatteryOptimizationIgnored()
+        val serviceOk = AppBlockerService.isRunning
+
+        val sb = StringBuilder()
+        sb.appendLine("${if (usageOk) "✅" else "⚠️"} Acesso ao Uso (UsageStats): ${if (usageOk) "Ativo" else "Pendente"}")
+        sb.appendLine("${if (overlayOk) "✅" else "⚠️"} Sobreposição de Tela (Overlay): ${if (overlayOk) "Ativa" else "Pendente"}")
+        sb.appendLine("${if (notifOk) "✅" else "ℹ️"} Filtro de Notificações: ${if (notifOk) "Permitido" else "Opcional (desativado)"}")
+        sb.appendLine("${if (batteryOk) "✅" else "⚠️"} Execução sem Restrição de Bateria: ${if (batteryOk) "Otimizada" else "Recomendado ativar"}")
+        sb.append("${if (serviceOk) "✅" else "ℹ️"} Motor em Segundo Plano: ${if (serviceOk) "Rodando" else "Aguardando permissão"}")
+        binding.tvSystemHealthChecklist.text = sb.toString()
     }
 
     private fun isBatteryOptimizationIgnored(): Boolean {

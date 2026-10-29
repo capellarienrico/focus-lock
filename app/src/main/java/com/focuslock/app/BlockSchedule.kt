@@ -26,15 +26,17 @@ data class BlockSchedule(
         val startMinuteOfDay = startHour * 60 + startMinute
         val endMinuteOfDay = endHour * 60 + endMinute
 
-        return if (startMinuteOfDay <= endMinuteOfDay) {
-            activeDays.contains(currentDay) && (currentMinuteOfDay in startMinuteOfDay..endMinuteOfDay)
+        return if (startMinuteOfDay == endMinuteOfDay) {
+            activeDays.contains(currentDay)
+        } else if (startMinuteOfDay < endMinuteOfDay) {
+            activeDays.contains(currentDay) && (currentMinuteOfDay in startMinuteOfDay until endMinuteOfDay)
         } else {
             // Horário que cruza a meia-noite (ex: 22:00 às 06:00)
             if (currentMinuteOfDay >= startMinuteOfDay) {
                 activeDays.contains(currentDay)
-            } else if (currentMinuteOfDay <= endMinuteOfDay) {
+            } else if (currentMinuteOfDay < endMinuteOfDay) {
                 val yesterday = if (currentDay == Calendar.SUNDAY) Calendar.SATURDAY else currentDay - 1
-                activeDays.contains(yesterday) || activeDays.contains(currentDay)
+                activeDays.contains(yesterday)
             } else {
                 false
             }

@@ -229,18 +229,22 @@ class LockOverlayController(
         mindfulTimer?.cancel()
         val prefs = prefsProvider()
         val hadActiveSchedule = prefs.getSchedules().any { it.isActiveNow() }
+        val isTimeLimitBlock = currentBlockedReason.startsWith("TIME_LIMIT:")
         prefs.isManualLockActive = false
+        prefs.stopTimedFocus()
 
         if (prefs.isDailyBudgetEnabled) {
             prefs.incrementDailyOpensUsed()
         }
 
         vibrateSuccess()
+        FocusNotificationListenerService.syncSummaryNotification(serviceContext)
 
-        if (hadActiveSchedule) {
+        if (hadActiveSchedule || isTimeLimitBlock) {
             if (prefs.isDailyBudgetEnabled) {
                 val mins = prefs.dailySessionMinutes
-                prefs.snoozeSchedulesForMinutes(mins)
+                if (hadActiveSchedule) prefs.snoozeSchedulesForMinutes(mins)
+                if (isTimeLimitBlock) prefs.snoozeTimeLimitForMinutes(mins)
                 val used = prefs.getDailyOpensUsedToday()
                 val max = prefs.dailyMaxOpens
                 Toast.makeText(
@@ -260,7 +264,8 @@ class LockOverlayController(
             b.llSnoozeSection.visibility = View.VISIBLE
 
             val applySnooze: (Int) -> Unit = { mins ->
-                prefs.snoozeSchedulesForMinutes(mins)
+                if (hadActiveSchedule) prefs.snoozeSchedulesForMinutes(mins)
+                if (isTimeLimitBlock) prefs.snoozeTimeLimitForMinutes(mins)
                 Toast.makeText(
                     serviceContext,
                     "Desbloqueado com Senha Mestre! (Liberado por $mins min)",
@@ -289,6 +294,19 @@ class LockOverlayController(
         b.llCognitiveSection.visibility = View.GONE
         b.llSnoozeSection.visibility = View.GONE
         b.tvError.visibility = View.GONE
+
+        // Modo Monge em Sessão com Timer: esconde a Senha Mestre completamente até o timer acabar
+        if (prefs.isTimedFocusActive() && prefs.isMonkModeOnTimerEnabled) {
+            val remMins = ((prefs.getTimedFocusRemainingMillis() / 60_000L) + 1L)
+            b.llMindfulSection.visibility = View.VISIBLE
+            b.llPinSection.visibility = View.GONE
+            b.btnEmergencyPinUnlock.visibility = View.GONE
+            b.tvMindfulPrompt.text =
+                "🧘 Modo Monge Inquebrável Ativo\nSenha Mestre desabilitada até o fim da sessão (apenas Tag NFC física libera)."
+            b.tvMindfulCountdown.visibility = View.VISIBLE
+            b.tvMindfulCountdown.text = "⏳ Faltam cerca de $remMins min para concluir"
+            return
+        }
 
         when (mode) {
             BlockPreferences.MODE_DEEP_FOCUS_NFC -> {
@@ -372,6 +390,17 @@ class LockOverlayController(
                 pkg.startsWith("Shorts / Reels") -> {
                     b.tvBlockedAppName.text =
                         "Feed curto (Shorts / Reels) bloqueado! Vídeos normais e mensagens continuam liberados."
+                }
+                pkg.startsWith("TIME_LIMIT:") -> {
+                    val targetPkg = pkg.removePrefix("TIME_LIMIT:")
+                    val appLabel = try {
+                        val ai = serviceContext.packageManager.getApplicationInfo(targetPkg, 0)
+                        serviceContext.packageManager.getApplicationLabel(ai).toString()
+                    } catch (_: Exception) {
+                        "este aplicativo"
+                    }
+                    b.tvBlockedAppName.text =
+                        "⏳ Limite Diário Atingido! Você já usou ${prefs.dailyTimeLimitMinutes} min em \"$appLabel\" hoje."
                 }
                 else -> {
                     try {

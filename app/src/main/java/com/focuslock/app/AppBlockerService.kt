@@ -25,12 +25,14 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import java.util.concurrent.Executors
 
 /**
- * Serviço de bloqueio baseado em UsageStatsManager (Acesso ao Uso) + WindowManager Overlay.
- *
- * 100% compatível com aplicativos bancários (sem AccessibilityService) e imune às restrições
- * de Background Activity Launch (BAL) do Android 14/15/16 e ROMs customizadas (Samsung, Xiaomi, Motorola).
+ * Motor central do FocusLock Super App:
+ * - Bloqueio em tempo real baseado em UsageStatsManager + WindowManager Overlay (100% seguro p/ bancos)
+ * - Sessões Rápidas de Foco / Pomodoro com auto-conclusão
+ * - Limite Diário de Tempo de Tela por App
+ * - Pílula Flutuante Minimalista ("🔕 X notificações filtradas") sincronizada com a Tela Inicial
  */
 class AppBlockerService : Service() {
 
@@ -40,32 +42,66 @@ class AppBlockerService : Service() {
     private var currentForegroundPackage = ""
     private var currentForegroundClass = ""
     private var wasBlockingActive = false
+    private var wasTimedFocusActive = false
+
     private val handler = Handler(Looper.getMainLooper())
+    private val usageRefreshExecutor = Executors.newSingleThreadExecutor()
+    @Volatile
+    private var cachedTodayUsageMap: Map<String, Long> = emptyMap()
+    @Volatile
+    private var lastUsageRefreshMillis = 0L
+    @Volatile
+    private var isRefreshingUsage = false
+
     private var powerManager: PowerManager? = null
     private var lockOverlay: LockOverlayController? = null
+    private var floatingPill: FloatingFilterPillController? = null
 
     private val watchdogRunnable = object : Runnable {
         override fun run() {
-            var nextDelay = 1200L
+            var nextDelay = 1500L
             try {
                 val isScreenOn = powerManager?.isInteractive ?: true
                 if (isScreenOn) {
                     val prefs = getPrefs()
-                    val isActive = prefs.isBlockingCurrentlyActive()
-                    if (isActive) {
+
+                    // Verifica conclusão natural do Timer Pomodoro / Sessão Rápida
+                    val isTimerNow = prefs.isTimedFocusActive()
+                    if (wasTimedFocusActive && !isTimerNow && prefs.timedFocusUntilMillis > 0L) {
+                        prefs.stopTimedFocus()
+                        postTimedFocusCompletedNotification()
+                        FocusNotificationListenerService.syncSummaryNotification(this@AppBlockerService)
+                    }
+                    wasTimedFocusActive = isTimerNow
+
+                    val isBlocking = prefs.isBlockingCurrentlyActive()
+                    val isTimeLimitMonitoring = prefs.isDailyTimeLimitEnabled &&
+                            prefs.getTimeLimitedPackages().isNotEmpty() &&
+                            !prefs.isTimeLimitSnoozed()
+                    val isPillHomeTracking = prefs.isNotificationFilterEnabled &&
+                            prefs.floatingPillMode != BlockPreferences.PILL_MODE_OFF &&
+                            NotificationFilterStore.getInstance(this@AppBlockerService).getActiveCount() > 0
+
+                    if (isBlocking) {
                         nextDelay = 350L
-                        // Janela de 2h na ativação inicial e 60s contínuos para evitar falha de micro-janela no Android 14/15+
                         val lookbackMs = if (!wasBlockingActive) 7_200_000L else 60_000L
                         wasBlockingActive = true
-                        checkCurrentWindowAndBlock(lookbackMs)
+                        checkCurrentWindowAndEvaluate(lookbackMs, isBlocking = true, isTimeLimitMonitoring = isTimeLimitMonitoring)
                     } else {
                         if (wasBlockingActive) {
                             lockOverlay?.dismiss()
                         }
                         wasBlockingActive = false
+
+                        if (isTimeLimitMonitoring || isPillHomeTracking) {
+                            nextDelay = if (isTimeLimitMonitoring) 1000L else 1400L
+                            checkCurrentWindowAndEvaluate(60_000L, isBlocking = false, isTimeLimitMonitoring = isTimeLimitMonitoring)
+                        } else {
+                            updateFloatingPillForCurrentState()
+                        }
                     }
                 } else {
-                    nextDelay = 2000L
+                    nextDelay = 2200L
                 }
             } catch (e: Exception) {
                 Log.e("AppBlockerService", "Erro no monitoramento de foco", e)
@@ -86,6 +122,11 @@ class AppBlockerService : Service() {
                 launchLockActivitySafely(blockedReason)
             }
         )
+        floatingPill = FloatingFilterPillController(
+            serviceContext = this,
+            prefsProvider = { getPrefs() }
+        )
+        wasTimedFocusActive = getPrefs().isTimedFocusActive()
         startForegroundSafely()
         restartWatchdogNow()
     }
@@ -135,8 +176,8 @@ class AppBlockerService : Service() {
 
             val notification: Notification = NotificationCompat.Builder(this, channelId)
                 .setSmallIcon(R.drawable.ic_focus_shield)
-                .setContentTitle("FocusLock Ativo")
-                .setContentText("Proteção de foco ativa em segundo plano (Modo Seguro Bancos)")
+                .setContentTitle("FocusLock Super App Ativo")
+                .setContentText("Proteção de foco & bem-estar prontos (Compatível com Bancos)")
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)
                 .setSilent(true)
@@ -157,12 +198,108 @@ class AppBlockerService : Service() {
         }
     }
 
-    private fun checkCurrentWindowAndBlock(lookbackMs: Long) {
-        if (!isServiceEnabled(this)) return
+    private fun postTimedFocusCompletedNotification() {
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val alertChannelId = "focus_lock_timer_done_channel"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    alertChannelId,
+                    "Conclusão de Sessão de Foco",
+                    NotificationManager.IMPORTANCE_DEFAULT
+                )
+                nm.createNotificationChannel(channel)
+            }
+            val openIntent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+            val pi = PendingIntent.getActivity(
+                this,
+                1009,
+                openIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val notif = NotificationCompat.Builder(this, alertChannelId)
+                .setSmallIcon(R.drawable.ic_focus_shield)
+                .setContentTitle("✅ Sessão de Foco Concluída!")
+                .setContentText("Parabéns pela disciplina! Seus aplicativos foram liberados.")
+                .setAutoCancel(true)
+                .setContentIntent(pi)
+                .build()
+            nm.notify(1009, notif)
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun checkCurrentWindowAndEvaluate(
+        lookbackMs: Long,
+        isBlocking: Boolean,
+        isTimeLimitMonitoring: Boolean
+    ) {
+        if (!isServiceEnabled(this)) {
+            updateFloatingPillForCurrentState()
+            return
+        }
+
         val (activePkg, activeClass) = queryForegroundPackageAndClass(lookbackMs)
-        if (activePkg.isNotBlank()) {
+        updateFloatingPillForCurrentState(activePkg)
+
+        if (activePkg.isBlank()) return
+
+        if (isBlocking) {
             evaluateAndBlockPackage(activePkg, activeClass)
         }
+
+        if (isTimeLimitMonitoring && !isLockUiShowing()) {
+            evaluateDailyTimeLimit(activePkg)
+        }
+    }
+
+    private fun evaluateDailyTimeLimit(packageName: String) {
+        if (packageName.isBlank() || packageName == this.packageName) return
+        val prefs = getPrefs()
+        if (!prefs.isDailyTimeLimitEnabled || prefs.isTimeLimitSnoozed()) return
+        if (prefs.isAlwaysAllowed(packageName)) return
+
+        val limitedSet = prefs.getTimeLimitedPackages()
+        if (!limitedSet.contains(packageName)) return
+
+        val now = System.currentTimeMillis()
+        if (now - lastUsageRefreshMillis > 15_000L && !isRefreshingUsage) {
+            isRefreshingUsage = true
+            usageRefreshExecutor.execute {
+                try {
+                    cachedTodayUsageMap = AppMetadataHelper.queryTodayUsageMap(applicationContext)
+                    lastUsageRefreshMillis = System.currentTimeMillis()
+                } finally {
+                    isRefreshingUsage = false
+                }
+            }
+        }
+
+        val usedTodayMs = cachedTodayUsageMap[packageName] ?: return
+        val limitMs = prefs.dailyTimeLimitMinutes * 60_000L
+        if (usedTodayMs >= limitMs) {
+            if (now < lastBlockedTime || now - lastBlockedTime < 350L) return
+            lastBlockedTime = now
+            if (now - lastStatRecordedTime > 3000L) {
+                lastStatRecordedTime = now
+                prefs.recordBlockedAttempt()
+            }
+            showBlockScreen("TIME_LIMIT:$packageName")
+        }
+    }
+
+    private fun updateFloatingPillForCurrentState(activePkg: String = currentForegroundPackage) {
+        val pill = floatingPill ?: return
+        if (isLockUiShowing() || FilteredNotificationsActivity.isResumed) {
+            pill.hide()
+            return
+        }
+        val count = NotificationFilterStore.getInstance(this).getActiveCount()
+        val prefs = getPrefs()
+        val isOnHomeOrMain = MainActivity.isResumed || prefs.isHomeLauncherPackage(activePkg)
+        pill.updateVisibilityAndCount(count, isOnHomeOrMain)
     }
 
     private fun queryForegroundPackageAndClass(lookbackMs: Long): Pair<String, String> {
@@ -171,8 +308,6 @@ class AppBlockerService : Service() {
 
         val now = System.currentTimeMillis()
 
-        // Se aguardávamos transição para a Home mas nenhum app novo assumiu o foco após 1.6s,
-        // limpa o filtro temporal para reavaliar o aplicativo que continuou aberto na tela.
         if (ignoreEventsBeforeTimestamp > 0L && now - ignoreEventsBeforeTimestamp > 1600L) {
             ignoreEventsBeforeTimestamp = 0L
         }
@@ -204,7 +339,9 @@ class AppBlockerService : Service() {
                 ignoreEventsBeforeTimestamp = 0L
             }
         } else if (ignoreEventsBeforeTimestamp == 0L) {
-            val isSelfActuallyInForeground = MainActivity.isResumed || LockActivity.isShowing
+            val isSelfActuallyInForeground = MainActivity.isResumed ||
+                    LockActivity.isShowing ||
+                    FilteredNotificationsActivity.isResumed
             if (currentForegroundPackage.isBlank() ||
                 (currentForegroundPackage == this.packageName && !isSelfActuallyInForeground)
             ) {
@@ -228,14 +365,9 @@ class AppBlockerService : Service() {
 
     private fun evaluateAndBlockPackage(packageName: String, className: String) {
         if (packageName.isBlank()) return
-
-        // Ignora o próprio FocusLock
-        if (packageName == this.packageName) {
-            return
-        }
+        if (packageName == this.packageName) return
 
         val prefs = getPrefs()
-
         if (!prefs.isBlockingCurrentlyActive() || isLockUiShowing()) {
             return
         }
@@ -245,7 +377,6 @@ class AppBlockerService : Service() {
             return
         }
 
-        // Proteção Anti-Burla (Strict Mode): impede desinstalar ou forçar parada durante o bloqueio
         if (prefs.isAntiTamperEnabled && isSettingsTamperAttempt(packageName, className)) {
             lastBlockedTime = now
             if (now - lastStatRecordedTime > 3000L) {
@@ -294,11 +425,9 @@ class AppBlockerService : Service() {
     }
 
     private fun showBlockScreen(blockedPkgOrReason: String) {
-        // Camada 1: Bloqueio instantâneo garantido via WindowManager (TYPE_APPLICATION_OVERLAY).
-        // Não sofre bloqueio de Background Activity Launch (BAL) em nenhum Android ou fabricante.
+        floatingPill?.hide()
         val overlayShown = lockOverlay?.show(blockedPkgOrReason) == true
         if (!overlayShown) {
-            // Fallback direto caso a sobreposição não esteja disponível
             launchLockActivitySafely(blockedPkgOrReason)
         }
     }
@@ -313,8 +442,6 @@ class AppBlockerService : Service() {
             putExtra("BLOCKED_PACKAGE", blockedPkgOrReason)
         }
 
-        // Camada 2: Dispara PendingIntent com opt-in explícito de BAL (Android 14+) enquanto o Overlay
-        // está visível na tela, permitindo que a LockActivity assuma o ForegroundDispatch do NFC.
         try {
             val piFlags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             val pi = PendingIntent.getActivity(this, 2001, lockIntent, piFlags)
@@ -367,8 +494,11 @@ class AppBlockerService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(watchdogRunnable)
+        usageRefreshExecutor.shutdownNow()
         lockOverlay?.dismiss()
         lockOverlay = null
+        floatingPill?.hide()
+        floatingPill = null
         isRunning = false
         instance = null
         super.onDestroy()
@@ -390,6 +520,7 @@ class AppBlockerService : Service() {
             instance?.handler?.post {
                 if (LockActivity.isShowing) {
                     instance?.lockOverlay?.dismiss()
+                    instance?.floatingPill?.hide()
                 }
             }
         }
@@ -400,11 +531,21 @@ class AppBlockerService : Service() {
             }
         }
 
+        fun refreshFloatingFilterPill() {
+            instance?.let { svc ->
+                svc.handler.post {
+                    svc.updateFloatingPillForCurrentState()
+                }
+            }
+        }
+
         fun onUnlocked() {
             instance?.let { svc ->
                 svc.wasBlockingActive = false
+                svc.wasTimedFocusActive = false
                 svc.handler.post {
                     svc.lockOverlay?.dismiss()
+                    svc.updateFloatingPillForCurrentState()
                 }
             }
         }
@@ -412,6 +553,8 @@ class AppBlockerService : Service() {
         fun notifyStateChanged() {
             instance?.let { svc ->
                 svc.wasBlockingActive = false
+                svc.lastUsageRefreshMillis = 0L
+                svc.wasTimedFocusActive = svc.getPrefs().isTimedFocusActive()
                 svc.handler.post {
                     svc.restartWatchdogNow()
                 }

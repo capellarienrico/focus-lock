@@ -65,11 +65,142 @@ class BlockPreferences(private val appContext: Context) {
             prefs.edit().putBoolean(KEY_COGNITIVE_CHALLENGE, value).commit()
         }
 
+    var isMonkModeOnTimerEnabled: Boolean
+        get() = prefs.getBoolean(KEY_MONK_MODE_TIMER, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_MONK_MODE_TIMER, value).commit()
+        }
+
     var customLockQuote: String
         get() = prefs.getString(KEY_CUSTOM_LOCK_QUOTE, DEFAULT_LOCK_QUOTE) ?: DEFAULT_LOCK_QUOTE
         set(value) {
             prefs.edit().putString(KEY_CUSTOM_LOCK_QUOTE, value).commit()
         }
+
+    // =========================================================================
+    // Sessão Rápida de Foco / Pomodoro Timer
+    // =========================================================================
+
+    var timedFocusUntilMillis: Long
+        get() = prefs.getLong(KEY_TIMED_FOCUS_UNTIL, 0L)
+        set(value) {
+            prefs.edit().putLong(KEY_TIMED_FOCUS_UNTIL, value).commit()
+        }
+
+    var timedFocusDurationMinutes: Int
+        get() = prefs.getInt(KEY_TIMED_FOCUS_DURATION_MINS, 25)
+        set(value) {
+            prefs.edit().putInt(KEY_TIMED_FOCUS_DURATION_MINS, value).commit()
+        }
+
+    fun startTimedFocusMinutes(minutes: Int) {
+        val until = System.currentTimeMillis() + (minutes * 60_000L)
+        prefs.edit()
+            .putLong(KEY_TIMED_FOCUS_UNTIL, until)
+            .putInt(KEY_TIMED_FOCUS_DURATION_MINS, minutes)
+            .putLong(KEY_SCHEDULE_SNOOZE_UNTIL, 0L)
+            .putLong(KEY_TIME_LIMIT_SNOOZE_UNTIL, 0L)
+            .commit()
+    }
+
+    fun stopTimedFocus() {
+        timedFocusUntilMillis = 0L
+    }
+
+    fun isTimedFocusActive(): Boolean {
+        return System.currentTimeMillis() < timedFocusUntilMillis
+    }
+
+    fun getTimedFocusRemainingMillis(): Long {
+        return (timedFocusUntilMillis - System.currentTimeMillis()).coerceAtLeast(0L)
+    }
+
+    // =========================================================================
+    // Limite Diário de Tempo de Tela por App (Estilo Minimalist Phone / Wellbeing)
+    // =========================================================================
+
+    var isDailyTimeLimitEnabled: Boolean
+        get() = prefs.getBoolean(KEY_DAILY_TIME_LIMIT_ENABLED, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_DAILY_TIME_LIMIT_ENABLED, value).commit()
+        }
+
+    var dailyTimeLimitMinutes: Int
+        get() = prefs.getInt(KEY_DAILY_TIME_LIMIT_MINUTES, 30)
+        set(value) {
+            prefs.edit().putInt(KEY_DAILY_TIME_LIMIT_MINUTES, value).commit()
+        }
+
+    var timeLimitSnoozeUntilMillis: Long
+        get() = prefs.getLong(KEY_TIME_LIMIT_SNOOZE_UNTIL, 0L)
+        set(value) {
+            prefs.edit().putLong(KEY_TIME_LIMIT_SNOOZE_UNTIL, value).commit()
+        }
+
+    fun snoozeTimeLimitForMinutes(minutes: Int) {
+        timeLimitSnoozeUntilMillis = System.currentTimeMillis() + (minutes * 60_000L)
+    }
+
+    fun isTimeLimitSnoozed(): Boolean {
+        return System.currentTimeMillis() < timeLimitSnoozeUntilMillis
+    }
+
+    fun getTimeLimitedPackages(): Set<String> {
+        return readStringSetJson(KEY_TIME_LIMITED_PACKAGES_JSON)
+    }
+
+    fun saveTimeLimitedPackages(packages: Set<String>) {
+        writeStringSetJson(KEY_TIME_LIMITED_PACKAGES_JSON, packages)
+    }
+
+    // =========================================================================
+    // Filtro de Notificações (Estilo Minimalist Phone)
+    // =========================================================================
+
+    var isNotificationFilterEnabled: Boolean
+        get() = prefs.getBoolean(KEY_NOTIF_FILTER_ENABLED, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_NOTIF_FILTER_ENABLED, value).commit()
+        }
+
+    var notificationFilterMode: String
+        get() = prefs.getString(KEY_NOTIF_FILTER_MODE, NOTIF_MODE_ALWAYS) ?: NOTIF_MODE_ALWAYS
+        set(value) {
+            prefs.edit().putString(KEY_NOTIF_FILTER_MODE, value).commit()
+        }
+
+    var floatingPillMode: String
+        get() = prefs.getString(KEY_FLOATING_PILL_MODE, PILL_MODE_HOME_ONLY) ?: PILL_MODE_HOME_ONLY
+        set(value) {
+            prefs.edit().putString(KEY_FLOATING_PILL_MODE, value).commit()
+        }
+
+    var floatingPillYOffsetPx: Int
+        get() = prefs.getInt(KEY_FLOATING_PILL_Y_OFFSET, 240)
+        set(value) {
+            prefs.edit().putInt(KEY_FLOATING_PILL_Y_OFFSET, value).commit()
+        }
+
+    fun getFilteredNotificationPackages(): Set<String> {
+        return readStringSetJson(KEY_FILTERED_NOTIF_PACKAGES_JSON)
+    }
+
+    fun saveFilteredNotificationPackages(packages: Set<String>) {
+        writeStringSetJson(KEY_FILTERED_NOTIF_PACKAGES_JSON, packages)
+    }
+
+    fun shouldFilterNotificationsNow(): Boolean {
+        if (!isNotificationFilterEnabled) return false
+        return if (notificationFilterMode == NOTIF_MODE_ONLY_DURING_FOCUS) {
+            isBlockingCurrentlyActive()
+        } else {
+            true
+        }
+    }
+
+    // =========================================================================
+    // Orçamento Diário de Aberturas (Estilo ScreenZen)
+    // =========================================================================
 
     var isDailyBudgetEnabled: Boolean
         get() = prefs.getBoolean(KEY_DAILY_BUDGET_ENABLED, false)
@@ -144,6 +275,7 @@ class BlockPreferences(private val appContext: Context) {
             val editor = prefs.edit().putBoolean(KEY_MANUAL_LOCK, value)
             if (value) {
                 editor.putLong(KEY_SCHEDULE_SNOOZE_UNTIL, 0L)
+                editor.putLong(KEY_TIME_LIMIT_SNOOZE_UNTIL, 0L)
             }
             editor.commit()
         }
@@ -251,7 +383,7 @@ class BlockPreferences(private val appContext: Context) {
                 startMinute = 0,
                 endHour = 18,
                 endMinute = 0,
-                daysOfWeek = listOf(1, 2, 3, 4, 5, 6, 7), // Todos os dias por padrão
+                daysOfWeek = listOf(1, 2, 3, 4, 5, 6, 7),
                 isEnabled = false
             )
         )
@@ -260,17 +392,7 @@ class BlockPreferences(private val appContext: Context) {
     fun getBlockedPackages(): Set<String> {
         val jsonStr = prefs.getString(KEY_BLOCKED_PACKAGES_JSON, null)
         if (jsonStr != null) {
-            return try {
-                val arr = JSONArray(jsonStr)
-                val set = mutableSetOf<String>()
-                for (i in 0 until arr.length()) {
-                    val pkg = arr.optString(i)
-                    if (pkg.isNotBlank()) set.add(pkg)
-                }
-                set
-            } catch (e: Exception) {
-                emptySet()
-            }
+            return readStringSetJson(KEY_BLOCKED_PACKAGES_JSON)
         }
         return prefs.getStringSet(KEY_BLOCKED_PACKAGES, emptySet())?.toSet() ?: emptySet()
     }
@@ -284,30 +406,51 @@ class BlockPreferences(private val appContext: Context) {
             .commit()
     }
 
+    private fun readStringSetJson(key: String): Set<String> {
+        val jsonStr = prefs.getString(key, null) ?: return emptySet()
+        return try {
+            val arr = JSONArray(jsonStr)
+            val set = mutableSetOf<String>()
+            for (i in 0 until arr.length()) {
+                val pkg = arr.optString(i)
+                if (pkg.isNotBlank()) set.add(pkg)
+            }
+            set
+        } catch (_: Exception) {
+            emptySet()
+        }
+    }
+
+    private fun writeStringSetJson(key: String, values: Set<String>) {
+        val arr = JSONArray()
+        values.forEach { arr.put(it) }
+        prefs.edit().putString(key, arr.toString()).commit()
+    }
+
     fun isAnyScheduleActiveNow(): Boolean {
         if (isScheduleSnoozed()) return false
         return getSchedules().any { it.isActiveNow() }
     }
 
     fun isBlockingCurrentlyActive(): Boolean {
-        return isManualLockActive || isAnyScheduleActiveNow()
+        return isManualLockActive || isTimedFocusActive() || isAnyScheduleActiveNow()
     }
 
     /**
-     * Determina se o pacote deve ser bloqueado no momento atual.
+     * Determina se o pacote deve ser bloqueado no momento atual (bloqueio manual, timer ou horário).
      */
     fun shouldBlockNow(packageName: String): Boolean {
         if (packageName.isBlank()) return false
 
-        // 1. Apps que NUNCA podem ser bloqueados (WhatsApp, Telefone, Teclado, Launcher, FocusLock)
+        // 1. Apps que NUNCA podem ser bloqueados (WhatsApp, Bancos, Telefone, Teclado, Launcher, FocusLock)
         if (isAlwaysAllowed(packageName)) {
             return false
         }
 
         val globalBlockedList = getBlockedPackages()
 
-        // 2. Bloqueio Manual ativo
-        if (isManualLockActive) {
+        // 2. Bloqueio Manual ou Sessão Pomodoro com Timer ativos
+        if (isManualLockActive || isTimedFocusActive()) {
             if (globalBlockedList.isEmpty() || globalBlockedList.contains(packageName)) {
                 return true
             }
@@ -335,46 +478,72 @@ class BlockPreferences(private val appContext: Context) {
     @Volatile
     private var cachedAllowedSysPackages: Set<String> = emptySet()
     @Volatile
+    private var cachedHomePackages: Set<String> = emptySet()
+    @Volatile
     private var lastCacheTimeMillis: Long = 0L
 
-    private fun getDynamicSystemAllowedPackages(): Set<String> {
+    private fun refreshDynamicSystemPackages() {
         val now = System.currentTimeMillis()
         if (now - lastCacheTimeMillis < 60_000L && cachedAllowedSysPackages.isNotEmpty()) {
-            return cachedAllowedSysPackages
+            return
         }
-        val result = mutableSetOf<String>()
+        val sysResult = mutableSetOf<String>()
+        val homeResult = mutableSetOf<String>()
         try {
             val imm = appContext.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-            imm?.enabledInputMethodList?.forEach { result.add(it.packageName) }
-            imm?.inputMethodList?.forEach { result.add(it.packageName) }
+            imm?.enabledInputMethodList?.forEach { sysResult.add(it.packageName) }
+            imm?.inputMethodList?.forEach { sysResult.add(it.packageName) }
         } catch (_: Exception) {
         }
         try {
             val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
             appContext.packageManager.queryIntentActivities(homeIntent, 0)
                 .mapNotNull { it.activityInfo?.packageName }
-                .forEach { result.add(it) }
+                .forEach {
+                    sysResult.add(it)
+                    homeResult.add(it)
+                }
             val resolveInfo = appContext.packageManager.resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
-            resolveInfo?.activityInfo?.packageName?.let { result.add(it) }
+            resolveInfo?.activityInfo?.packageName?.let {
+                sysResult.add(it)
+                homeResult.add(it)
+            }
         } catch (_: Exception) {
         }
         try {
             val dialIntent = Intent(Intent.ACTION_DIAL)
             appContext.packageManager.queryIntentActivities(dialIntent, 0)
                 .mapNotNull { it.activityInfo?.packageName }
-                .forEach { result.add(it) }
+                .forEach { sysResult.add(it) }
         } catch (_: Exception) {
         }
-        cachedAllowedSysPackages = result
+        cachedAllowedSysPackages = sysResult
+        cachedHomePackages = homeResult
         lastCacheTimeMillis = now
-        return result
     }
 
-    fun isAlwaysAllowed(packageName: String): Boolean {
-        val lower = packageName.lowercase()
+    private fun getDynamicSystemAllowedPackages(): Set<String> {
+        refreshDynamicSystemPackages()
+        return cachedAllowedSysPackages
+    }
 
-        // WhatsApp (padrão e business)
-        if (packageName == "com.whatsapp" || packageName == "com.whatsapp.w4b") return true
+    fun isHomeLauncherPackage(packageName: String): Boolean {
+        if (packageName.isBlank()) return false
+        refreshDynamicSystemPackages()
+        if (cachedHomePackages.contains(packageName)) return true
+        val lower = packageName.lowercase()
+        return packageName == "com.miui.home" ||
+                lower.endsWith(".home") ||
+                lower.contains("launcher") ||
+                lower.contains("trebuchet")
+    }
+
+    /**
+     * Verifica se o pacote é de banco, sistema crítico, teclado, discador ou launcher
+     * (não inclui o WhatsApp, permitindo opcionalmente filtrar notificações do WhatsApp sem bloqueá-lo).
+     */
+    fun isBankingOrCriticalSystemPackage(packageName: String): Boolean {
+        val lower = packageName.lowercase()
 
         // Aplicativos de Banco e Pagamentos (sempre liberados e nunca monitorados)
         if (BANKING_PACKAGES.contains(packageName) ||
@@ -428,10 +597,125 @@ class BlockPreferences(private val appContext: Context) {
         return false
     }
 
+    fun isAlwaysAllowed(packageName: String): Boolean {
+        // WhatsApp (padrão e business) nunca pode ser bloqueado de abrir
+        if (packageName == "com.whatsapp" || packageName == "com.whatsapp.w4b") return true
+        return isBankingOrCriticalSystemPackage(packageName)
+    }
+
+    // =========================================================================
+    // Backup & Restauração em JSON
+    // =========================================================================
+
+    fun exportBackupJson(): String {
+        val root = JSONObject()
+        root.put("version", 3)
+        root.put("strictnessMode", strictnessMode)
+        root.put("antiTamper", isAntiTamperEnabled)
+        root.put("cognitiveChallenge", isCognitiveChallengeEnabled)
+        root.put("monkModeTimer", isMonkModeOnTimerEnabled)
+        root.put("customLockQuote", customLockQuote)
+        root.put("dailyBudgetEnabled", isDailyBudgetEnabled)
+        root.put("dailyMaxOpens", dailyMaxOpens)
+        root.put("dailySessionMinutes", dailySessionMinutes)
+        root.put("dailyTimeLimitEnabled", isDailyTimeLimitEnabled)
+        root.put("dailyTimeLimitMinutes", dailyTimeLimitMinutes)
+        root.put("notifFilterEnabled", isNotificationFilterEnabled)
+        root.put("notifFilterMode", notificationFilterMode)
+        root.put("floatingPillMode", floatingPillMode)
+        root.put("blockedPackages", JSONArray(getBlockedPackages().toList()))
+        root.put("filteredNotifPackages", JSONArray(getFilteredNotificationPackages().toList()))
+        root.put("timeLimitedPackages", JSONArray(getTimeLimitedPackages().toList()))
+
+        val schedulesArr = JSONArray()
+        getSchedules().forEach { schedulesArr.put(it.toJson()) }
+        root.put("schedules", schedulesArr)
+
+        val tagsArr = JSONArray()
+        getNfcTags().forEach { tagsArr.put(it.toJson()) }
+        root.put("nfcTags", tagsArr)
+
+        return root.toString(2)
+    }
+
+    fun importBackupJson(jsonString: String): Boolean {
+        return try {
+            val root = JSONObject(jsonString)
+            strictnessMode = root.optString("strictnessMode", strictnessMode)
+            isAntiTamperEnabled = root.optBoolean("antiTamper", isAntiTamperEnabled)
+            isCognitiveChallengeEnabled = root.optBoolean("cognitiveChallenge", isCognitiveChallengeEnabled)
+            isMonkModeOnTimerEnabled = root.optBoolean("monkModeTimer", isMonkModeOnTimerEnabled)
+            customLockQuote = root.optString("customLockQuote", customLockQuote)
+            isDailyBudgetEnabled = root.optBoolean("dailyBudgetEnabled", isDailyBudgetEnabled)
+            dailyMaxOpens = root.optInt("dailyMaxOpens", dailyMaxOpens)
+            dailySessionMinutes = root.optInt("dailySessionMinutes", dailySessionMinutes)
+            isDailyTimeLimitEnabled = root.optBoolean("dailyTimeLimitEnabled", isDailyTimeLimitEnabled)
+            dailyTimeLimitMinutes = root.optInt("dailyTimeLimitMinutes", dailyTimeLimitMinutes)
+            isNotificationFilterEnabled = root.optBoolean("notifFilterEnabled", isNotificationFilterEnabled)
+            notificationFilterMode = root.optString("notifFilterMode", notificationFilterMode)
+            floatingPillMode = root.optString("floatingPillMode", floatingPillMode)
+
+            root.optJSONArray("blockedPackages")?.let { arr ->
+                val set = mutableSetOf<String>()
+                for (i in 0 until arr.length()) {
+                    val p = arr.optString(i)
+                    if (p.isNotBlank()) set.add(p)
+                }
+                saveBlockedPackages(set)
+            }
+
+            root.optJSONArray("filteredNotifPackages")?.let { arr ->
+                val set = mutableSetOf<String>()
+                for (i in 0 until arr.length()) {
+                    val p = arr.optString(i)
+                    if (p.isNotBlank()) set.add(p)
+                }
+                saveFilteredNotificationPackages(set)
+            }
+
+            root.optJSONArray("timeLimitedPackages")?.let { arr ->
+                val set = mutableSetOf<String>()
+                for (i in 0 until arr.length()) {
+                    val p = arr.optString(i)
+                    if (p.isNotBlank()) set.add(p)
+                }
+                saveTimeLimitedPackages(set)
+            }
+
+            root.optJSONArray("schedules")?.let { arr ->
+                val list = mutableListOf<BlockSchedule>()
+                for (i in 0 until arr.length()) {
+                    list.add(BlockSchedule.fromJson(arr.getJSONObject(i)))
+                }
+                saveSchedules(list)
+            }
+
+            root.optJSONArray("nfcTags")?.let { arr ->
+                val list = mutableListOf<NfcTagProfile>()
+                for (i in 0 until arr.length()) {
+                    val item = NfcTagProfile.fromJson(arr.getJSONObject(i))
+                    if (item.uid.isNotBlank()) list.add(item)
+                }
+                saveNfcTags(list)
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     companion object {
         const val MODE_NORMAL = "NORMAL"
         const val MODE_MINDFUL_DELAY = "MINDFUL_DELAY"
         const val MODE_DEEP_FOCUS_NFC = "DEEP_FOCUS_NFC"
+
+        const val NOTIF_MODE_ALWAYS = "ALWAYS"
+        const val NOTIF_MODE_ONLY_DURING_FOCUS = "ONLY_FOCUS"
+
+        const val PILL_MODE_HOME_ONLY = "HOME_ONLY"
+        const val PILL_MODE_ALWAYS = "ALWAYS"
+        const val PILL_MODE_OFF = "OFF"
+
         const val DEFAULT_LOCK_QUOTE = "Mantenha o foco no que realmente importa hoje."
 
         private val BANKING_PACKAGES = setOf(
@@ -459,7 +743,19 @@ class BlockPreferences(private val appContext: Context) {
         private const val KEY_ANTI_TAMPER = "anti_tamper_enabled"
         private const val KEY_BLOCK_SHORTS_REELS = "block_shorts_reels"
         private const val KEY_COGNITIVE_CHALLENGE = "cognitive_challenge"
+        private const val KEY_MONK_MODE_TIMER = "monk_mode_timer"
         private const val KEY_CUSTOM_LOCK_QUOTE = "custom_lock_quote"
+        private const val KEY_TIMED_FOCUS_UNTIL = "timed_focus_until"
+        private const val KEY_TIMED_FOCUS_DURATION_MINS = "timed_focus_duration_mins"
+        private const val KEY_DAILY_TIME_LIMIT_ENABLED = "daily_time_limit_enabled"
+        private const val KEY_DAILY_TIME_LIMIT_MINUTES = "daily_time_limit_minutes"
+        private const val KEY_TIME_LIMIT_SNOOZE_UNTIL = "time_limit_snooze_until"
+        private const val KEY_TIME_LIMITED_PACKAGES_JSON = "time_limited_packages_json"
+        private const val KEY_NOTIF_FILTER_ENABLED = "notif_filter_enabled"
+        private const val KEY_NOTIF_FILTER_MODE = "notif_filter_mode"
+        private const val KEY_FLOATING_PILL_MODE = "floating_pill_mode"
+        private const val KEY_FLOATING_PILL_Y_OFFSET = "floating_pill_y_offset"
+        private const val KEY_FILTERED_NOTIF_PACKAGES_JSON = "filtered_notif_packages_json"
         private const val KEY_DAILY_BUDGET_ENABLED = "daily_budget_enabled"
         private const val KEY_DAILY_MAX_OPENS = "daily_max_opens"
         private const val KEY_DAILY_SESSION_MINUTES = "daily_session_minutes"

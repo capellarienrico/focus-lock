@@ -43,17 +43,17 @@ jobs:
           name: FocusLock-Debug-APK
           path: app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Publish GitHub Release v2.1
+      - name: Publish GitHub Release v3.0
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if gh release view v2.1 >/dev/null 2>&1; then
-            gh release upload v2.1 FocusLock.apk --clobber
+          if gh release view v3.0 >/dev/null 2>&1; then
+            gh release upload v3.0 FocusLock.apk --clobber
           else
-            gh release create v2.1 FocusLock.apk \
-              --title "FocusLock v2.1 (Motor de Bloqueio Overlay + Compatível com Bancos)" \
-              --notes "FocusLock v2.1 APK pronto para instalação direta no Android. Corrige o bloqueio de aplicativos no Android 11 a 16 (Samsung, Xiaomi, Motorola, Pixel) usando janela de sobreposição real (WindowManager Overlay) imune ao bloqueio de Background Activity Launch (BAL), visibilidade total no UsageStatsManager e 100% compatível com apps de banco (sem AccessibilityService)." \
+            gh release create v3.0 FocusLock.apk \
+              --title "FocusLock v3.0 — Super App Edition (Filtro de Notificações, Seletor Inteligente & Pomodoro)" \
+              --notes "FocusLock v3.0 Super App APK pronto para instalação direta no Android (100% compatível com apps de banco, sem AccessibilityService). Inclui: (1) Motor de bloqueio real via WindowManager Overlay imune ao bloqueio BAL do Android 14–16; (2) Filtro de Notificações Minimalista com Pílula Flutuante ('🔕 X notificações filtradas') e Caixa Silenciosa; (3) Seletor Inteligente de Apps categorizado e ordenável por Tempo de Tela, Tamanho, Nome e Instalação; (4) Sessões Rápidas Pomodoro + Modo Monge; (5) Limite Diário de Tempo de Tela por App e Painel de Bem-Estar Digital + Backup JSON." \
               --latest
           fi

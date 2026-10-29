@@ -10,40 +10,65 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
         android:paddingStart="20dp"
-        android:paddingTop="18dp"
+        android:paddingTop="16dp"
         android:paddingEnd="20dp"
         android:paddingBottom="10dp">
 
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:letterSpacing="0.08"
-            android:text="FOCUSLOCK"
-            android:textColor="@color/accent_blue"
-            android:textSize="24sp"
-            android:textStyle="bold" />
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:letterSpacing="0.08"
+                android:text="FOCUSLOCK"
+                android:textColor="@color/accent_blue"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:text="Super App de Foco, Filtro Minimalista &amp; NFC"
+                android:textColor="@color/text_secondary"
+                android:textSize="11.5sp" />
+        </LinearLayout>
 
         <TextView
+            android:id="@+id/tvHeaderFilteredPill"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:text="Bloqueio inteligente por Tag NFC &amp; Horários"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
+            android:background="@drawable/bg_card"
+            android:paddingStart="10dp"
+            android:paddingTop="5dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="5dp"
+            android:text="🔕 0 filtradas"
+            android:textColor="@color/accent_blue"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
     </LinearLayout>
 
-    <!-- Navigation Tabs -->
+    <!-- 5-Tab Navigation Bar -->
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/tabLayoutMain"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="@color/card_dark"
-        app:tabGravity="fill"
+        app:tabGravity="center"
         app:tabIndicatorColor="@color/accent_blue"
         app:tabIndicatorHeight="3dp"
-        app:tabMode="fixed"
+        app:tabMode="scrollable"
+        app:tabPaddingEnd="14dp"
+        app:tabPaddingStart="14dp"
         app:tabSelectedTextColor="@color/accent_blue"
         app:tabTextAppearance="@style/TextAppearance.AppCompat.Body2"
         app:tabTextColor="@color/text_secondary">
@@ -56,7 +81,12 @@
         <com.google.android.material.tabs.TabItem
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="⏰ Horários" />
+            android:text="🔔 Filtro" />
+
+        <com.google.android.material.tabs.TabItem
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="⏰ Rotinas" />
 
         <com.google.android.material.tabs.TabItem
             android:layout_width="wrap_content"
@@ -81,9 +111,9 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="20dp">
+            android:padding="18dp">
 
-            <!-- Usage Stats & Overlay Warning Banner (Only visible if missing permissions) -->
+            <!-- Usage Stats, Overlay & Battery Warning Banner -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/cardAccessibilityWarning"
                 android:layout_width="match_parent"
@@ -155,7 +185,7 @@
             </com.google.android.material.card.MaterialCardView>
 
             <!-- ========================================================= -->
-            <!-- ABA 1: FOCO (Status Principal & Seleção de Apps)          -->
+            <!-- ABA 1: FOCO (Status, Sessão Pomodoro, Apps & Bem-Estar)   -->
             <!-- ========================================================= -->
             <LinearLayout
                 android:id="@+id/llTabFocus"
@@ -171,12 +201,12 @@
                     android:background="@drawable/bg_card"
                     android:gravity="center"
                     android:orientation="vertical"
-                    android:padding="24dp">
+                    android:padding="20dp">
 
                     <ImageView
                         android:id="@+id/ivLockStatus"
-                        android:layout_width="60dp"
-                        android:layout_height="60dp"
+                        android:layout_width="56dp"
+                        android:layout_height="56dp"
                         android:src="@drawable/ic_lock"
                         app:tint="@color/accent_green" />
 
@@ -184,11 +214,12 @@
                         android:id="@+id/tvLockStatus"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:letterSpacing="0.08"
+                        android:layout_marginTop="10dp"
+                        android:gravity="center"
+                        android:letterSpacing="0.06"
                         android:text="STATUS: LIVRE"
                         android:textColor="@color/accent_green"
-                        android:textSize="18sp"
+                        android:textSize="17sp"
                         android:textStyle="bold" />
 
                     <TextView
@@ -205,7 +236,7 @@
                         android:id="@+id/tvTodayBlockedBadge"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
+                        android:layout_marginTop="6dp"
                         android:text="🛡️ 0 distrações bloqueadas hoje"
                         android:textColor="@color/accent_blue"
                         android:textSize="12sp"
@@ -214,20 +245,111 @@
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnToggleLock"
                         android:layout_width="match_parent"
-                        android:layout_height="54dp"
-                        android:layout_marginTop="16dp"
+                        android:layout_height="52dp"
+                        android:layout_marginTop="14dp"
                         android:backgroundTint="@color/accent_blue"
                         android:text="@string/btn_lock_now"
                         android:textColor="@color/text_white"
                         android:textStyle="bold"
                         app:cornerRadius="12dp" />
+
+                    <!-- Quick Pomodoro / Timed Focus Bar -->
+                    <LinearLayout
+                        android:id="@+id/llQuickTimersSection"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:gravity="center"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="⏳ Sessão Rápida com Timer (Pomodoro)"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="11.5sp" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:orientation="horizontal">
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnTimer25m"
+                                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                                android:layout_width="0dp"
+                                android:layout_height="38dp"
+                                android:layout_marginEnd="5dp"
+                                android:layout_weight="1"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:padding="0dp"
+                                android:text="25m"
+                                android:textAllCaps="false"
+                                android:textColor="@color/accent_green"
+                                android:textSize="12sp"
+                                app:cornerRadius="8dp"
+                                app:strokeColor="@color/card_border" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnTimer45m"
+                                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                                android:layout_width="0dp"
+                                android:layout_height="38dp"
+                                android:layout_marginEnd="5dp"
+                                android:layout_weight="1"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:padding="0dp"
+                                android:text="45m"
+                                android:textAllCaps="false"
+                                android:textColor="@color/accent_green"
+                                android:textSize="12sp"
+                                app:cornerRadius="8dp"
+                                app:strokeColor="@color/card_border" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnTimer60m"
+                                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                                android:layout_width="0dp"
+                                android:layout_height="38dp"
+                                android:layout_marginEnd="5dp"
+                                android:layout_weight="1"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:padding="0dp"
+                                android:text="1h"
+                                android:textAllCaps="false"
+                                android:textColor="@color/accent_green"
+                                android:textSize="12sp"
+                                app:cornerRadius="8dp"
+                                app:strokeColor="@color/card_border" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnTimerCustom"
+                                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                                android:layout_width="0dp"
+                                android:layout_height="38dp"
+                                android:layout_weight="1.2"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:padding="0dp"
+                                android:text="Outro..."
+                                android:textAllCaps="false"
+                                android:textColor="@color/accent_blue"
+                                android:textSize="12sp"
+                                app:cornerRadius="8dp"
+                                app:strokeColor="@color/card_border" />
+                        </LinearLayout>
+                    </LinearLayout>
                 </LinearLayout>
 
                 <!-- Global Apps Selection Card -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
+                    android:layout_marginTop="14dp"
                     android:background="@drawable/bg_card"
                     android:orientation="vertical"
                     android:padding="16dp">
@@ -244,7 +366,7 @@
                         android:id="@+id/tvBlockedAppsSummary"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
+                        android:layout_marginTop="4dp"
                         android:text="Apps bloqueados: Todos (exceto WhatsApp e Bancos)"
                         android:textColor="@color/text_secondary"
                         android:textSize="12sp" />
@@ -255,7 +377,8 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="10dp"
-                        android:text="Escolher Apps para Bloquear"
+                        android:text="📱 Escolher Apps (Categorias, Tamanho &amp; Tempo)"
+                        android:textAllCaps="false"
                         android:textColor="@color/accent_blue"
                         app:cornerRadius="8dp"
                         app:strokeColor="@color/accent_blue" />
@@ -263,15 +386,367 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
+                        android:layout_marginTop="10dp"
                         android:text="@string/whatsapp_whitelist_notice"
                         android:textColor="@color/accent_green"
                         android:textSize="11sp" />
                 </LinearLayout>
+
+                <!-- Digital Wellbeing Live Dashboard Card -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:layout_marginBottom="16dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="📊 Raio-X de Bem-Estar Hoje"
+                            android:textColor="@color/text_white"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnRefreshUsageStats"
+                            style="@style/Widget.MaterialComponents.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="34dp"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp"
+                            android:minWidth="0dp"
+                            android:text="↻ Atualizar"
+                            android:textAllCaps="false"
+                            android:textColor="@color/accent_blue"
+                            android:textSize="11.5sp" />
+                    </LinearLayout>
+
+                    <!-- 3 KPI Mini Tiles -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="6dp"
+                            android:layout_weight="1"
+                            android:background="@color/bg_dark"
+                            android:gravity="center"
+                            android:orientation="vertical"
+                            android:padding="10dp">
+
+                            <TextView
+                                android:id="@+id/tvKpiScreenTime"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="0m"
+                                android:textColor="@color/accent_blue"
+                                android:textSize="16sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Tempo Hoje"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="10.5sp" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="6dp"
+                            android:layout_weight="1"
+                            android:background="@color/bg_dark"
+                            android:gravity="center"
+                            android:orientation="vertical"
+                            android:padding="10dp">
+
+                            <TextView
+                                android:id="@+id/tvKpiBlockedToday"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="0"
+                                android:textColor="@color/accent_red"
+                                android:textSize="16sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Bloqueios"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="10.5sp" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:background="@color/bg_dark"
+                            android:gravity="center"
+                            android:orientation="vertical"
+                            android:padding="10dp">
+
+                            <TextView
+                                android:id="@+id/tvKpiFilteredToday"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="0"
+                                android:textColor="@color/accent_green"
+                                android:textSize="16sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Filtradas"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="10.5sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="Apps mais usados hoje:"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11.5sp" />
+
+                    <LinearLayout
+                        android:id="@+id/llTopUsageContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:orientation="vertical" />
+                </LinearLayout>
             </LinearLayout>
 
             <!-- ========================================================= -->
-            <!-- ABA 2: HORÁRIOS (Rotinas Automáticas & Orçamento Diário)  -->
+            <!-- ABA 2: FILTRO DE NOTIFICAÇÕES (Estilo Minimalist Phone)   -->
+            <!-- ========================================================= -->
+            <LinearLayout
+                android:id="@+id/llTabNotifFilter"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <!-- Notification Listener Permission Banner -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardNotifListenerWarning"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="14dp"
+                    android:visibility="gone"
+                    app:cardBackgroundColor="#1E2538"
+                    app:cardCornerRadius="12dp"
+                    app:strokeColor="@color/accent_blue"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="14dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="🔔 Ative o Acesso a Notificações"
+                            android:textColor="@color/accent_blue"
+                            android:textSize="14sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:text="Para silenciar notificações dos apps selecionados e agrupá-las em &quot;X notificações filtradas&quot; (como no Minimalist Phone), permita o FocusLock em Acesso a Notificações."
+                            android:textColor="@color/text_white"
+                            android:textSize="12sp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnEnableNotifListener"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:backgroundTint="@color/accent_blue"
+                            android:text="PERMITIR ACESSO A NOTIFICAÇÕES"
+                            android:textColor="@color/text_white"
+                            android:textStyle="bold"
+                            app:cornerRadius="8dp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Main Notification Filter Card -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Filtro de Notificações"
+                                android:textColor="@color/text_white"
+                                android:textSize="16sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tvNotifFilterSummary"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="Intercepta distrações e mostra uma pílula minimalista &quot;X notificações filtradas&quot;"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp" />
+                        </LinearLayout>
+
+                        <androidx.appcompat.widget.SwitchCompat
+                            android:id="@+id/switchNotifFilter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnOpenFilteredInbox"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginTop="14dp"
+                        android:backgroundTint="@color/accent_blue"
+                        android:text="📬 ABRIR CAIXA FILTRADA (0)"
+                        android:textColor="@color/text_white"
+                        android:textStyle="bold"
+                        app:cornerRadius="10dp" />
+
+                    <TextView
+                        android:id="@+id/tvFilteredAppsCountSummary"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="Apps no filtro: Nenhum app selecionado ainda"
+                        android:textColor="@color/accent_green"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSelectFilteredNotifApps"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="📱 Escolher Apps para Filtrar Notificações"
+                        android:textAllCaps="false"
+                        android:textColor="@color/accent_blue"
+                        app:cornerRadius="8dp"
+                        app:strokeColor="@color/accent_blue" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnNotifFilterMode"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="Quando filtrar: Sempre Ativo (24h)"
+                        android:textAllCaps="false"
+                        android:textColor="@color/text_white"
+                        android:textSize="12sp"
+                        app:cornerRadius="8dp"
+                        app:strokeColor="@color/card_border" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnFloatingPillMode"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="Pílula Flutuante: Apenas na Tela Inicial"
+                        android:textAllCaps="false"
+                        android:textColor="@color/text_white"
+                        android:textSize="12sp"
+                        app:cornerRadius="8dp"
+                        app:strokeColor="@color/card_border" />
+                </LinearLayout>
+
+                <!-- Preview of Latest Filtered Notifications -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:layout_marginBottom="16dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Últimas Notificações Filtradas"
+                            android:textColor="@color/text_white"
+                            android:textSize="14sp"
+                            android:textStyle="bold" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnClearRecentFiltered"
+                            style="@style/Widget.MaterialComponents.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="34dp"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp"
+                            android:minWidth="0dp"
+                            android:text="Limpar Tudo"
+                            android:textAllCaps="false"
+                            android:textColor="@color/accent_red"
+                            android:textSize="11.5sp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/llRecentFilteredContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:orientation="vertical" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- ========================================================= -->
+            <!-- ABA 3: ROTINAS (Horários, Limite de Tempo & Orçamento)    -->
             <!-- ========================================================= -->
             <LinearLayout
                 android:id="@+id/llTabSchedules"
@@ -295,8 +770,8 @@
                         android:orientation="horizontal">
 
                         <ImageView
-                            android:layout_width="26dp"
-                            android:layout_height="26dp"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
                             android:src="@drawable/ic_time"
                             app:tint="@color/accent_blue" />
 
@@ -315,11 +790,10 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
-                        android:text="Ative rotinas automáticas por dia da semana e escolha apps específicos para cada horário."
+                        android:text="Ative rotinas automáticas por dia da semana e escolha apps específicos para cada bloco."
                         android:textColor="@color/text_secondary"
                         android:textSize="12sp" />
 
-                    <!-- Dynamic List of Schedule Blocks -->
                     <LinearLayout
                         android:id="@+id/llSchedulesContainer"
                         android:layout_width="match_parent"
@@ -334,16 +808,96 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="10dp"
                         android:text="+ Novo Bloco de Horário"
+                        android:textAllCaps="false"
                         android:textColor="@color/accent_blue"
                         app:cornerRadius="8dp"
                         app:strokeColor="@color/accent_blue" />
+                </LinearLayout>
+
+                <!-- Daily Screen Time Limit Per App Card -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="⏳ Limite Diário de Tempo por App"
+                                android:textColor="@color/text_white"
+                                android:textSize="15sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tvDailyTimeLimitSummary"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="Bloqueia automaticamente após 30 min de uso no dia (0 apps selecionados)"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp" />
+                        </LinearLayout>
+
+                        <androidx.appcompat.widget.SwitchCompat
+                            android:id="@+id/switchDailyTimeLimit"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnSelectTimeLimitApps"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="6dp"
+                            android:layout_weight="1.3"
+                            android:text="Escolher Apps"
+                            android:textAllCaps="false"
+                            android:textColor="@color/accent_blue"
+                            app:cornerRadius="8dp"
+                            app:strokeColor="@color/accent_blue" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnConfigureTimeLimitMins"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Limite: 30m"
+                            android:textAllCaps="false"
+                            android:textColor="@color/accent_green"
+                            app:cornerRadius="8dp"
+                            app:strokeColor="@color/accent_green" />
+                    </LinearLayout>
                 </LinearLayout>
 
                 <!-- Daily Opens Budget Card (ScreenZen Style) -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
+                    android:layout_marginTop="14dp"
+                    android:layout_marginBottom="16dp"
                     android:background="@drawable/bg_card"
                     android:orientation="vertical"
                     android:padding="16dp">
@@ -391,6 +945,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="10dp"
                         android:text="Configurar Limite de Aberturas e Tempo"
+                        android:textAllCaps="false"
                         android:textColor="@color/accent_blue"
                         app:cornerRadius="8dp"
                         app:strokeColor="@color/accent_blue" />
@@ -398,7 +953,7 @@
             </LinearLayout>
 
             <!-- ========================================================= -->
-            <!-- ABA 3: RIGOR (Modos de Rigor & Barreiras Anti-Impulso)    -->
+            <!-- ABA 4: RIGOR (Modos de Rigor & Barreiras Anti-Impulso)    -->
             <!-- ========================================================= -->
             <LinearLayout
                 android:id="@+id/llTabStrictness"
@@ -440,6 +995,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="10dp"
                         android:text="Alterar Modo (Normal / Pausa 15s / Deep Focus NFC)"
+                        android:textAllCaps="false"
                         android:textColor="@color/accent_blue"
                         app:cornerRadius="8dp"
                         app:strokeColor="@color/accent_blue" />
@@ -449,7 +1005,8 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
+                    android:layout_marginTop="14dp"
+                    android:layout_marginBottom="16dp"
                     android:background="@drawable/bg_card"
                     android:orientation="vertical"
                     android:padding="16dp">
@@ -461,6 +1018,42 @@
                         android:textColor="@color/text_white"
                         android:textSize="15sp"
                         android:textStyle="bold" />
+
+                    <!-- Monk Mode on Timer Toggle -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="🧘 Modo Monge em Sessões com Timer"
+                                android:textColor="@color/text_white"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Oculta até mesmo a Senha Mestre enquanto um Timer Pomodoro estiver rodando (só Tag NFC libera)"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <androidx.appcompat.widget.SwitchCompat
+                            android:id="@+id/switchMonkModeTimer"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
 
                     <!-- Anti-Tamper Toggle -->
                     <LinearLayout
@@ -558,7 +1151,7 @@
             </LinearLayout>
 
             <!-- ========================================================= -->
-            <!-- ABA 4: AJUSTES (Tags NFC, Senha Mestre & Modo Bancos)     -->
+            <!-- ABA 5: AJUSTES (Tags NFC, Senha, Diagnóstico & Backup)    -->
             <!-- ========================================================= -->
             <LinearLayout
                 android:id="@+id/llTabSettings"
@@ -582,8 +1175,8 @@
                         android:orientation="horizontal">
 
                         <ImageView
-                            android:layout_width="26dp"
-                            android:layout_height="26dp"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
                             android:src="@drawable/ic_nfc"
                             app:tint="@color/accent_blue" />
 
@@ -613,6 +1206,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="10dp"
                         android:text="+ Cadastrar / Gerenciar Tags NFC"
+                        android:textAllCaps="false"
                         android:textColor="@color/accent_blue"
                         app:cornerRadius="8dp"
                         app:strokeColor="@color/accent_blue" />
@@ -622,7 +1216,7 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
+                    android:layout_marginTop="14dp"
                     android:background="@drawable/bg_card"
                     android:orientation="vertical"
                     android:padding="16dp">
@@ -657,6 +1251,7 @@
                             android:layout_marginEnd="6dp"
                             android:layout_weight="1"
                             android:text="Alterar Senha"
+                            android:textAllCaps="false"
                             android:textColor="@color/accent_blue"
                             app:cornerRadius="8dp"
                             app:strokeColor="@color/accent_blue" />
@@ -668,17 +1263,76 @@
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
                             android:text="Reset Aleatório"
+                            android:textAllCaps="false"
                             android:textColor="@color/accent_green"
                             app:cornerRadius="8dp"
                             app:strokeColor="@color/accent_green" />
                     </LinearLayout>
                 </LinearLayout>
 
-                <!-- Bank Compatibility Info Card -->
+                <!-- Backup & Restore Card -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
+                    android:layout_marginTop="14dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="💾 Backup &amp; Restauração"
+                        android:textColor="@color/text_white"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="Exporte ou importe todas as suas listas de apps, rotinas de horário, filtro de notificações e tags NFC."
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnExportBackup"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="6dp"
+                            android:layout_weight="1"
+                            android:text="Copiar Backup"
+                            android:textAllCaps="false"
+                            android:textColor="@color/accent_blue"
+                            app:cornerRadius="8dp"
+                            app:strokeColor="@color/accent_blue" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnImportBackup"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Importar JSON"
+                            android:textAllCaps="false"
+                            android:textColor="@color/accent_green"
+                            app:cornerRadius="8dp"
+                            app:strokeColor="@color/accent_green" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- System Diagnostics & Bank-Safe Mode Card -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
                     android:layout_marginBottom="20dp"
                     android:background="@drawable/bg_card"
                     android:orientation="vertical"
@@ -687,18 +1341,28 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="🏦 Modo Seguro para Bancos Ativo"
+                        android:text="🩺 Diagnóstico do Sistema &amp; Modo Bancos"
                         android:textColor="@color/accent_green"
                         android:textSize="14sp"
                         android:textStyle="bold" />
 
                     <TextView
+                        android:id="@+id/tvSystemHealthChecklist"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:lineSpacingExtra="3dp"
+                        android:text="Verificando permissões..."
+                        android:textColor="@color/text_white"
+                        android:textSize="12sp" />
+
+                    <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="O FocusLock utiliza a API de Acesso ao Uso (UsageStats) do Android em vez de Serviços de Acessibilidade. Ele não lê textos da tela, não captura toques e não aciona alertas de segurança em apps de banco (como Nubank, Itaú e Bradesco)."
+                        android:layout_marginTop="8dp"
+                        android:text="🏦 100% Compatível com Bancos: Utiliza UsageStats + WindowManager Overlay + NotificationListener, sem AccessibilityService (zero conflito com Nubank, Itaú, Bradesco e PIX)."
                         android:textColor="@color/text_secondary"
-                        android:textSize="12sp" />
+                        android:textSize="11.5sp" />
                 </LinearLayout>
             </LinearLayout>
 
