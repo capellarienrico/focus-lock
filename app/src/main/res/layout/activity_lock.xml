@@ -94,6 +94,7 @@
                 app:tint="@color/accent_blue" />
 
             <TextView
+                android:id="@+id/tvNfcPromptTitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
@@ -103,10 +104,11 @@
                 android:textStyle="bold" />
 
             <TextView
+                android:id="@+id/tvNfcPromptSubtitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
-                android:text="Encoste na tag de casa para desbloquear instantaneamente"
+                android:text="Encoste na sua tag para desbloquear"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
         </LinearLayout>

@@ -130,8 +130,9 @@ class LockActivity : AppCompatActivity() {
             binding.etPin.hint = "Senha Forte EXTREME"
             binding.tvBlockedStats.text = "🔥 MODO EXTREME ATIVO"
             binding.tvLockQuote.text = "Apenas Câmera e Telefone permitidos."
-            binding.tvBlockedAppTitle.text = "Aplicativo Bloqueado pelo Modo EXTREME"
-            binding.tvNfcPrompt.text = "Aproxime a Tag NFC EXTREME para desbloquear"
+            binding.tvBlockedAppName.text = "Aplicativo Bloqueado pelo Modo EXTREME"
+            binding.tvNfcPromptTitle.text = "Aproxime a Tag NFC EXTREME"
+            binding.tvNfcPromptSubtitle.text = "Encoste a sua tag EXTREME para desbloquear"
             return
         }
 

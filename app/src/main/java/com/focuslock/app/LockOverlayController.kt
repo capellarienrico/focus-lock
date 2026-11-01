@@ -321,7 +321,8 @@ class LockOverlayController(
             b.llMindfulSection.visibility = View.GONE
             b.llPinSection.visibility = View.VISIBLE
             b.etPin.hint = "Senha Forte EXTREME"
-            b.tvNfcPrompt.text = "Aproxime a Tag NFC EXTREME para desbloquear"
+            b.tvNfcPromptTitle.text = "Aproxime a Tag NFC EXTREME"
+            b.tvNfcPromptSubtitle.text = "Encoste a sua tag EXTREME para desbloquear"
             return
         }
 
@@ -378,7 +379,7 @@ class LockOverlayController(
         if (prefs.isExtremeActive) {
             b.tvBlockedStats.text = "🔥 MODO EXTREME ATIVO • Celular Bloqueado"
             b.tvCustomQuote.text = "Apenas Câmera e Telefone permitidos."
-            b.tvBlockedAppTitle.text = "Aplicativo Bloqueado pelo Modo EXTREME"
+            b.tvBlockedAppName.text = "Aplicativo Bloqueado pelo Modo EXTREME"
             b.tvDailyBudgetStatus.visibility = View.GONE
             return
         }
