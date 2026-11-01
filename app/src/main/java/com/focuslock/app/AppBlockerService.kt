@@ -40,8 +40,6 @@ class AppBlockerService : Service() {
 
     private var lastBlockedTime = 0L
     private var lastStatRecordedTime = 0L
-    private var minEventTimestamp = 0L
-    private var lastQueriedEventTime = 0L
     private var currentForegroundPackage = ""
     private var currentForegroundClass = ""
     private var wasSelfInForeground = false
@@ -78,8 +76,6 @@ class AppBlockerService : Service() {
                 Intent.ACTION_SCREEN_ON,
                 Intent.ACTION_USER_PRESENT -> {
                     isScreenInteractive = true
-                    // Força janela inicial curta (15s) ao reacender a tela para identificar o app aberto
-                    lastQueriedEventTime = 0L
                     restartWatchdogNow()
                 }
             }
@@ -115,13 +111,11 @@ class AppBlockerService : Service() {
 
                 if (isBlocking) {
                     nextDelay = 400L
-                    val initialLookback = if (!wasBlockingActive) 1_800_000L else 15_000L
                     if (!wasBlockingActive) {
                         wasBlockingActive = true
                         FocusQuickTileService.requestListeningStateSafe(this@AppBlockerService)
                     }
                     checkCurrentWindowAndEvaluate(
-                        coldLookbackMs = initialLookback,
                         isBlocking = true,
                         isTimeLimitMonitoring = isTimeLimitMonitoring
                     )
@@ -135,7 +129,6 @@ class AppBlockerService : Service() {
                     if (isTimeLimitMonitoring || isPillHomeOnlyTracking) {
                         nextDelay = if (isTimeLimitMonitoring) 1200L else 1800L
                         checkCurrentWindowAndEvaluate(
-                            coldLookbackMs = 15_000L,
                             isBlocking = false,
                             isTimeLimitMonitoring = isTimeLimitMonitoring
                         )
@@ -305,7 +298,6 @@ class AppBlockerService : Service() {
     }
 
     private fun checkCurrentWindowAndEvaluate(
-        coldLookbackMs: Long,
         isBlocking: Boolean,
         isTimeLimitMonitoring: Boolean
     ) {
@@ -314,7 +306,7 @@ class AppBlockerService : Service() {
             return
         }
 
-        val (activePkg, activeClass) = queryForegroundPackageAndClassIncremental(coldLookbackMs)
+        val (activePkg, activeClass) = queryForegroundPackageAndClass()
         updateFloatingPillForCurrentState(activePkg)
 
         if (activePkg.isBlank()) return
@@ -382,10 +374,10 @@ class AppBlockerService : Service() {
     }
 
     /**
-     * Lê apenas o delta incremental de eventos desde [lastQueriedEventTime] (tipicamente ~400ms com 0 eventos),
-     * reduzindo o tráfego Binder IPC com o UsageStatsService em mais de 95%.
+     * Identifica confiavelmente o aplicativo em primeiro plano usando UsageStatsManager
+     * com janela deslizante de 12 segundos e fallback imediato caso a janela esteja sem novos eventos.
      */
-    private fun queryForegroundPackageAndClassIncremental(coldLookbackMs: Long): Pair<String, String> {
+    private fun queryForegroundPackageAndClass(): Pair<String, String> {
         if (FocusLockApp.isNonLockActivityInForeground) {
             wasSelfInForeground = true
             currentForegroundPackage = this.packageName
@@ -403,51 +395,41 @@ class AppBlockerService : Service() {
             ?: return currentForegroundPackage to currentForegroundClass
 
         val now = System.currentTimeMillis()
-        val rawStart = if (lastQueriedEventTime > 0L) {
-            lastQueriedEventTime - 80L
-        } else {
-            now - coldLookbackMs
-        }
-        val startQueryTime = maxOf(rawStart, minEventTimestamp)
-        if (startQueryTime >= now) {
-            return currentForegroundPackage to currentForegroundClass
-        }
+        val queryWindowStart = now - 12_000L
 
-        val events = usm.queryEvents(startQueryTime, now)
-        lastQueriedEventTime = now
+        val events = try {
+            usm.queryEvents(queryWindowStart, now)
+        } catch (_: Exception) {
+            null
+        }
 
         val event = UsageEvents.Event()
-        var activePkg: String? = null
-        var activeClass = ""
-        var activeTime = 0L
+        var latestActivePkg: String? = null
+        var latestActiveClass = ""
+        var latestActiveTime = 0L
         var sawCurrentPkgPaused = false
 
         while (events != null && events.hasNextEvent()) {
             events.getNextEvent(event)
             val ts = event.timeStamp
-            if (ts < minEventTimestamp) continue
-
             val evPkg = event.packageName ?: continue
             val evCls = event.className ?: ""
 
             when (event.eventType) {
                 UsageEvents.Event.ACTIVITY_RESUMED -> {
-                    if (ts >= activeTime) {
-                        activeTime = ts
-                        activePkg = evPkg
-                        activeClass = evCls
+                    if (ts >= latestActiveTime) {
+                        latestActiveTime = ts
+                        latestActivePkg = evPkg
+                        latestActiveClass = evCls
                     }
                     if (evPkg == currentForegroundPackage) {
                         sawCurrentPkgPaused = false
                     }
                 }
                 UsageEvents.Event.ACTIVITY_PAUSED -> {
-                    if (evPkg == activePkg &&
-                        (activeClass.isEmpty() || evCls.isEmpty() || evCls == activeClass) &&
-                        ts >= activeTime
-                    ) {
-                        activePkg = null
-                        activeClass = ""
+                    if (evPkg == latestActivePkg && ts >= latestActiveTime) {
+                        latestActivePkg = null
+                        latestActiveClass = ""
                     }
                     if (evPkg == currentForegroundPackage &&
                         (currentForegroundClass.isEmpty() || evCls.isEmpty() || evCls == currentForegroundClass)
@@ -458,12 +440,25 @@ class AppBlockerService : Service() {
             }
         }
 
-        if (!activePkg.isNullOrBlank()) {
-            currentForegroundPackage = activePkg
-            currentForegroundClass = activeClass
+        if (!latestActivePkg.isNullOrBlank()) {
+            currentForegroundPackage = latestActivePkg
+            currentForegroundClass = latestActiveClass
         } else if (sawCurrentPkgPaused) {
             currentForegroundPackage = ""
             currentForegroundClass = ""
+        }
+
+        // Fallback: se o pacote em primeiro plano estiver vazio (ex: acabou de ligar a tela, ou ficou mais de 12s sem trocar de app)
+        if (currentForegroundPackage.isBlank()) {
+            try {
+                val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - 60_000L, now)
+                val topStat = stats?.maxByOrNull { it.lastTimeUsed }
+                if (topStat != null && topStat.lastTimeUsed > 0L) {
+                    currentForegroundPackage = topStat.packageName
+                    currentForegroundClass = ""
+                }
+            } catch (_: Exception) {
+            }
         }
 
         return currentForegroundPackage to currentForegroundClass
@@ -660,9 +655,6 @@ class AppBlockerService : Service() {
 
         fun onUnlocked() {
             instance?.let { svc ->
-                val now = System.currentTimeMillis()
-                svc.minEventTimestamp = now
-                svc.lastQueriedEventTime = now
                 svc.currentForegroundPackage = ""
                 svc.currentForegroundClass = ""
                 svc.wasBlockingActive = false
@@ -678,15 +670,10 @@ class AppBlockerService : Service() {
 
         fun notifyStateChanged() {
             instance?.let { svc ->
-                val now = System.currentTimeMillis()
                 svc.lastUsagePermCheckMillis = 0L
                 if (FocusLockApp.isNonLockActivityInForeground) {
-                    svc.minEventTimestamp = now
-                    svc.lastQueriedEventTime = now
                     svc.currentForegroundPackage = svc.packageName
                     svc.currentForegroundClass = ""
-                } else {
-                    svc.lastQueriedEventTime = 0L
                 }
                 svc.wasBlockingActive = false
                 svc.lastUsageRefreshMillis = 0L
@@ -702,9 +689,8 @@ class AppBlockerService : Service() {
                 val now = System.currentTimeMillis()
                 it.currentForegroundPackage = ""
                 it.currentForegroundClass = ""
-                it.minEventTimestamp = now
-                it.lastQueriedEventTime = now
                 it.lastBlockedTime = now + 700L
+                it.lockOverlay?.dismiss()
             }
         }
 

@@ -25,8 +25,8 @@ android {
         applicationId = "com.focuslock.zen"
         minSdk = 26
         targetSdk = 34
-        versionCode = 9
-        versionName = "3.5"
+        versionCode = 10
+        versionName = "3.6"
     }
 
     signingConfigs {

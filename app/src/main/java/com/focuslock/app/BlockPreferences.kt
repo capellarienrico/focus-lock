@@ -565,55 +565,90 @@ class BlockPreferences(private val appContext: Context) {
     @Volatile
     private var cachedExtremeAllowedAt: Long = 0L
 
-    /** Pacotes liberados no EXTREME: Camera, Telefone/chamadas, Home (Tela Inicial), Teclado e FocusLock. */
+    /** Pacotes liberados no EXTREME: Camera, Telefone/chamadas, Home (Tela Inicial), Teclado, NFC e FocusLock. */
     fun isExtremeAllowedPackage(packageName: String): Boolean {
         if (packageName.isBlank()) return false
         val lower = packageName.lowercase()
 
-        // O próprio aplicativo FocusLock
+        // 1. O próprio aplicativo FocusLock
         if (packageName == appContext.packageName || lower.startsWith("com.focuslock")) return true
 
-        // Tela Inicial (Launcher nativo) - celular livre para tocar na câmera/telefone/focuslock
+        // 2. Tela Inicial (Launcher nativo) - celular livre para tocar na câmera/telefone/focuslock
         if (isHomeLauncherPackage(packageName)) return true
 
-        // Interface do sistema Android
-        if (packageName == "com.android.systemui" || packageName == "android") return true
+        // 3. Interface do sistema Android, NFC e controles de permissão
+        if (packageName == "com.android.systemui" ||
+            packageName == "android" ||
+            packageName == "com.android.nfc" ||
+            lower.contains("nfc") ||
+            lower.contains("permissioncontroller")
+        ) return true
 
-        // Teclados e IMEs do sistema (necessário para digitar a senha no bloqueador)
-        if (getDynamicSystemAllowedPackages().contains(packageName)) return true
+        // 4. Teclados e IMEs do sistema (necessário para digitar a senha no bloqueador)
+        if (getDynamicSystemAllowedPackages().contains(packageName) ||
+            lower.contains("keyboard") ||
+            lower.contains("gboard") ||
+            lower.contains("inputmethod") ||
+            lower.contains("latinime") ||
+            lower.contains("swiftkey") ||
+            lower.contains("honeyboard")
+        ) return true
 
-        // Telefone, Discador, Telecom, Incall e chamadas de emergência
+        // 5. Telefone, Discador, Telecom, Incall e chamadas de emergência
         if (packageName == "com.android.phone" ||
             packageName == "com.android.server.telecom" ||
+            packageName == "com.google.android.dialer" ||
             lower.contains("dialer") ||
             lower.contains("telecom") ||
             lower.contains("incall") ||
             lower.contains("emergency")
         ) return true
 
-        // Câmera
+        // 6. Câmera e Discador padrão via resolução estrita MATCH_DEFAULT_ONLY (sem queryIntentActivities aberto)
         val now = System.currentTimeMillis()
         if (now - cachedExtremeAllowedAt > 60_000L || cachedExtremeAllowed.isEmpty()) {
             val result = mutableSetOf<String>()
             val pm = appContext.packageManager
-            val probes = listOf(
+
+            val cameraProbes = listOf(
                 Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA),
                 Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE),
-                Intent(android.provider.MediaStore.ACTION_VIDEO_CAPTURE),
-                Intent(Intent.ACTION_DIAL)
+                Intent("android.media.action.STILL_IMAGE_CAMERA_SECURE")
             )
-            for (probe in probes) {
+            for (probe in cameraProbes) {
                 try {
-                    pm.queryIntentActivities(probe, 0)
-                        .mapNotNull { it.activityInfo?.packageName }
-                        .forEach { result.add(it) }
-                } catch (_: Exception) {
-                }
+                    val resolved = pm.resolveActivity(probe, PackageManager.MATCH_DEFAULT_ONLY)
+                    resolved?.activityInfo?.packageName?.let { result.add(it) }
+                } catch (_: Exception) {}
             }
+
+            try {
+                val dialerIntent = Intent(Intent.ACTION_DIAL)
+                val resolvedDialer = pm.resolveActivity(dialerIntent, PackageManager.MATCH_DEFAULT_ONLY)
+                resolvedDialer?.activityInfo?.packageName?.let { result.add(it) }
+            } catch (_: Exception) {}
+
+            try {
+                val telecomManager = appContext.getSystemService(Context.TELECOM_SERVICE) as? android.telecom.TelecomManager
+                telecomManager?.defaultDialerPackage?.let { result.add(it) }
+            } catch (_: Exception) {}
+
             cachedExtremeAllowed = result
             cachedExtremeAllowedAt = now
         }
-        return cachedExtremeAllowed.contains(packageName) || lower.contains(".camera")
+
+        if (cachedExtremeAllowed.contains(packageName)) return true
+
+        // 7. Câmeras nativas conhecidas de fabricantes
+        return packageName == "com.google.android.GoogleCamera" ||
+                packageName == "com.sec.android.app.camera" ||
+                packageName == "com.android.camera" ||
+                packageName == "com.android.camera2" ||
+                packageName == "com.motorola.camera2" ||
+                packageName == "com.motorola.camera3" ||
+                packageName == "com.oppo.camera" ||
+                packageName == "com.oneplus.camera" ||
+                lower.endsWith(".camera")
     }
 
     fun isBlockingCurrentlyActive(): Boolean {

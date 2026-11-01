@@ -58,17 +58,17 @@ jobs:
           name: FocusLock-Debug-APK
           path: app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Publish GitHub Release v3.5
+      - name: Publish GitHub Release v3.6
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if gh release view v3.5 >/dev/null 2>&1; then
-            gh release upload v3.5 FocusLock.apk --clobber
+          if gh release view v3.6 >/dev/null 2>&1; then
+            gh release upload v3.6 FocusLock.apk --clobber
           else
-            gh release create v3.5 FocusLock.apk \
-              --title "FocusLock v3.5 — Modo EXTREME Nativo (Zero Overlay na Tela Inicial, Câmera e NFC Livres)" \
-              --notes "FocusLock v3.5 APK assinado! Correções e melhorias: (1) Modo EXTREME como Perfil Nativo: sem overlay persistente sufocando a tela inicial ou popups do sistema — a tela inicial, a Câmera e o Telefone funcionam livremente e de forma 100% nativa; (2) Bloqueio Implacável ao Abrir: qualquer outro app (Instagram, WhatsApp, TikTok, Chrome, Bancos, Jogos, Configurações) é bloqueado na hora com a tela de bloqueio EXTREME; (3) Desbloqueio NFC Perfeito: a Tag NFC EXTREME é lida diretamente sem interferência ou popups travados; (4) Desbloqueio com Senha Forte EXTREME com proteção anti-força bruta; (5) Botão Início na tela de bloqueio para voltar sempre à Home e acessar a Câmera/Telefone com tranquilidade." \
+            gh release create v3.6 FocusLock.apk \
+              --title "FocusLock v3.6 — Correção Crítica de Detecção de Apps e Modo EXTREME Implacável" \
+              --notes "FocusLock v3.6 APK assinado! Correções fundamentais: (1) Detecção de Apps Infalível: corrigido problema com janela de eventos de uso do Android que causava perda de eventos em trocas de tela; (2) Modo EXTREME Seguro e Restrito: bloqueio garantido de todos os apps distrativos, mantendo 100% livres apenas Tela Inicial nativa, Câmera padrão, Telefone/emergência e NFC; (3) Estabilidade do Bloqueador: retorno suave à tela inicial sem loops ou perda de rastreamento." \
               --latest
           fi
