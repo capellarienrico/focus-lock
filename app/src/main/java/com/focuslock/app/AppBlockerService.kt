@@ -46,7 +46,6 @@ class AppBlockerService : Service() {
     private var currentForegroundClass = ""
     private var wasSelfInForeground = false
     private var wasBlockingActive = false
-    private var wasTimedFocusActive = false
     private var isScreenInteractive = true
     private var isScreenReceiverRegistered = false
     private var lastForegroundNotifBlockingState: Boolean? = null
@@ -65,11 +64,8 @@ class AppBlockerService : Service() {
 
     private var powerManager: PowerManager? = null
     private var lockOverlay: LockOverlayController? = null
+    private var extremeOverlay: ExtremeOverlayController? = null
     private var floatingPill: FloatingFilterPillController? = null
-
-    private val timerCompletionRunnable = Runnable {
-        checkTimedFocusCompletion(getPrefs())
-    }
 
     private val screenStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -79,19 +75,10 @@ class AppBlockerService : Service() {
                     // Pausa completamente o loop de monitoramento enquanto a tela está desligada (0% CPU)
                     handler.removeCallbacks(watchdogRunnable)
                     floatingPill?.hide()
-
-                    // Se houver um Timer Pomodoro rodando, agenda um único disparo exato para a conclusão
-                    val prefs = getPrefs()
-                    handler.removeCallbacks(timerCompletionRunnable)
-                    if (prefs.isTimedFocusActive()) {
-                        val rem = prefs.getTimedFocusRemainingMillis()
-                        handler.postDelayed(timerCompletionRunnable, (rem + 300L).coerceAtLeast(500L))
-                    }
                 }
                 Intent.ACTION_SCREEN_ON,
                 Intent.ACTION_USER_PRESENT -> {
                     isScreenInteractive = true
-                    handler.removeCallbacks(timerCompletionRunnable)
                     // Força janela inicial curta (15s) ao reacender a tela para identificar o app aberto
                     lastQueriedEventTime = 0L
                     restartWatchdogNow()
@@ -113,8 +100,10 @@ class AppBlockerService : Service() {
             var nextDelay = 15_000L
             try {
                 val prefs = getPrefs()
-                checkTimedFocusCompletion(prefs)
 
+                if (!prefs.isExtremeActive && extremeOverlay?.isShowing == true) {
+                    extremeOverlay?.dismiss()
+                }
                 val isBlocking = prefs.isBlockingCurrentlyActive()
                 syncForegroundNotificationIfChanged(isBlocking)
 
@@ -128,7 +117,10 @@ class AppBlockerService : Service() {
                         prefs.floatingPillMode == BlockPreferences.PILL_MODE_HOME_ONLY &&
                         NotificationFilterStore.getInstance(this@AppBlockerService).getActiveCount() > 0
 
-                if (isBlocking) {
+                if (prefs.isExtremeActive) {
+                    nextDelay = 400L
+                    evaluateExtremeMode(prefs)
+                } else if (isBlocking) {
                     nextDelay = 400L
                     val initialLookback = if (!wasBlockingActive) 1_800_000L else 15_000L
                     if (!wasBlockingActive) {
@@ -172,24 +164,13 @@ class AppBlockerService : Service() {
         }
     }
 
-    private fun checkTimedFocusCompletion(prefs: BlockPreferences) {
-        val isTimerNow = prefs.isTimedFocusActive()
-        if (wasTimedFocusActive && !isTimerNow && prefs.timedFocusUntilMillis > 0L) {
-            prefs.stopTimedFocus()
-            postTimedFocusCompletedNotification()
-            FocusNotificationListenerService.syncSummaryNotification(this)
-            FocusQuickTileService.requestListeningStateSafe(this)
-            syncForegroundNotificationIfChanged(prefs.isBlockingCurrentlyActive())
-        }
-        wasTimedFocusActive = isTimerNow
-    }
-
     override fun onCreate() {
         super.onCreate()
         instance = this
         isRunning = true
         powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
         isScreenInteractive = powerManager?.isInteractive ?: true
+        ServiceHeartbeat.schedule(this)
         registerScreenReceiverIfNeeded()
 
         lockOverlay = LockOverlayController(
@@ -199,12 +180,15 @@ class AppBlockerService : Service() {
                 launchLockActivitySafely(blockedReason)
             }
         )
+        extremeOverlay = ExtremeOverlayController(
+            serviceContext = this,
+            prefsProvider = { getPrefs() }
+        )
         floatingPill = FloatingFilterPillController(
             serviceContext = this,
             prefsProvider = { getPrefs() }
         )
         val prefs = getPrefs()
-        wasTimedFocusActive = prefs.isTimedFocusActive()
         startForegroundSafely(prefs.isBlockingCurrentlyActive())
         if (isScreenInteractive) {
             restartWatchdogNow()
@@ -216,6 +200,7 @@ class AppBlockerService : Service() {
         isRunning = true
         registerScreenReceiverIfNeeded()
         isScreenInteractive = powerManager?.isInteractive ?: true
+        ServiceHeartbeat.schedule(this)
         startForegroundSafely(getPrefs().isBlockingCurrentlyActive())
         if (isScreenInteractive) {
             restartWatchdogNow()
@@ -254,7 +239,8 @@ class AppBlockerService : Service() {
     }
 
     private fun isLockUiShowing(): Boolean {
-        return LockActivity.isShowing || (lockOverlay?.isShowing == true)
+        return LockActivity.isShowing || (lockOverlay?.isShowing == true) ||
+                (extremeOverlay?.isShowing == true) || ExtremeLockActivity.isResumed
     }
 
     private fun isUsagePermissionAllowedCached(): Boolean {
@@ -327,39 +313,6 @@ class AppBlockerService : Service() {
             }
         } catch (e: Exception) {
             Log.e("AppBlockerService", "Falha ao iniciar notificação foreground", e)
-        }
-    }
-
-    private fun postTimedFocusCompletedNotification() {
-        try {
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val alertChannelId = "focus_lock_timer_done_channel"
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val channel = NotificationChannel(
-                    alertChannelId,
-                    "Conclusão de Sessão de Foco",
-                    NotificationManager.IMPORTANCE_DEFAULT
-                )
-                nm.createNotificationChannel(channel)
-            }
-            val openIntent = Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-            }
-            val pi = PendingIntent.getActivity(
-                this,
-                1009,
-                openIntent,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            )
-            val notif = NotificationCompat.Builder(this, alertChannelId)
-                .setSmallIcon(R.drawable.ic_focus_shield)
-                .setContentTitle("✅ Sessão de Foco Concluída!")
-                .setContentText("Parabéns pela disciplina! Seus aplicativos foram liberados.")
-                .setAutoCancel(true)
-                .setContentIntent(pi)
-                .build()
-            nm.notify(1009, notif)
-        } catch (_: Exception) {
         }
     }
 
@@ -528,6 +481,36 @@ class AppBlockerService : Service() {
         return currentForegroundPackage to currentForegroundClass
     }
 
+    /**
+     * Modo EXTREME: tudo fica coberto pelo overlay, exceto Camera e Telefone (e chamadas).
+     * Sem permissao de uso ou sem evento de app em primeiro plano, o padrao e MANTER TRAVADO.
+     */
+    private fun evaluateExtremeMode(prefs: BlockPreferences) {
+        val lookback = if (!wasBlockingActive) 1_800_000L else 15_000L
+        if (!wasBlockingActive) {
+            wasBlockingActive = true
+            FocusQuickTileService.requestListeningStateSafe(this)
+        }
+        floatingPill?.hide()
+
+        var pkg = ""
+        if (isUsagePermissionAllowedCached()) {
+            pkg = queryForegroundPackageAndClassIncremental(lookback).first
+        }
+
+        if (pkg != this.packageName && prefs.isExtremeAllowedPackage(pkg)) {
+            if (extremeOverlay?.isShowing == true) extremeOverlay?.dismiss()
+            return
+        }
+
+        if (extremeOverlay?.isShowing == true) return
+        lockOverlay?.dismiss()
+        val shown = extremeOverlay?.show() == true
+        if (!shown && !ExtremeLockActivity.isResumed) {
+            ExtremeMode.openLockScreen(this)
+        }
+    }
+
     private fun evaluateAndBlockPackage(packageName: String, className: String) {
         if (packageName.isBlank()) return
         if (packageName == this.packageName) return
@@ -658,7 +641,6 @@ class AppBlockerService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(watchdogRunnable)
-        handler.removeCallbacks(timerCompletionRunnable)
         if (isScreenReceiverRegistered) {
             try {
                 unregisterReceiver(screenStateReceiver)
@@ -669,6 +651,8 @@ class AppBlockerService : Service() {
         usageRefreshExecutor.shutdownNow()
         lockOverlay?.dismiss()
         lockOverlay = null
+        extremeOverlay?.dismiss()
+        extremeOverlay = null
         floatingPill?.hide()
         floatingPill = null
         isRunning = false
@@ -700,6 +684,7 @@ class AppBlockerService : Service() {
         fun dismissOverlay() {
             instance?.handler?.post {
                 instance?.lockOverlay?.dismiss()
+                instance?.extremeOverlay?.dismiss()
             }
         }
 
@@ -726,10 +711,10 @@ class AppBlockerService : Service() {
                 svc.currentForegroundPackage = ""
                 svc.currentForegroundClass = ""
                 svc.wasBlockingActive = false
-                svc.wasTimedFocusActive = false
                 FocusQuickTileService.requestListeningStateSafe(svc)
                 svc.handler.post {
                     svc.lockOverlay?.dismiss()
+                    if (!svc.getPrefs().isExtremeActive) svc.extremeOverlay?.dismiss()
                     svc.syncForegroundNotificationIfChanged(false)
                     svc.updateFloatingPillForCurrentState()
                     svc.restartWatchdogNow()
@@ -751,7 +736,6 @@ class AppBlockerService : Service() {
                 }
                 svc.wasBlockingActive = false
                 svc.lastUsageRefreshMillis = 0L
-                svc.wasTimedFocusActive = svc.getPrefs().isTimedFocusActive()
                 FocusQuickTileService.requestListeningStateSafe(svc)
                 svc.handler.post {
                     svc.restartWatchdogNow()

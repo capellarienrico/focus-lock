@@ -15,6 +15,9 @@ class BootReceiver : BroadcastReceiver() {
                 AppBlockerService.ensureRunning(context)
                 FocusNotificationListenerService.syncSummaryNotification(context)
             }
+            ACTION_HEARTBEAT -> {
+                ServiceHeartbeat.onBeat(context)
+            }
             ACTION_CLEAR_FILTERED_NOTIFICATIONS -> {
                 NotificationFilterStore.getInstance(context).clearAll()
                 FocusNotificationListenerService.syncSummaryNotification(context)
@@ -24,6 +27,7 @@ class BootReceiver : BroadcastReceiver() {
 
     companion object {
         const val ACTION_RESTART_SERVICE = "com.focuslock.zen.ACTION_RESTART_SERVICE"
+        const val ACTION_HEARTBEAT = "com.focuslock.zen.ACTION_HEARTBEAT"
         const val ACTION_CLEAR_FILTERED_NOTIFICATIONS = "com.focuslock.zen.ACTION_CLEAR_FILTERED_NOTIFICATIONS"
     }
 }

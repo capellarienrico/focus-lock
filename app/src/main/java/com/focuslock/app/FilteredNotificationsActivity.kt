@@ -13,6 +13,8 @@ import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.focuslock.app.databinding.ActivityFilteredNotificationsBinding
@@ -46,6 +48,7 @@ class FilteredNotificationsActivity : AppCompatActivity() {
         adapter = FilteredNotificationsAdapter()
         binding.rvFilteredNotifications.layoutManager = LinearLayoutManager(this)
         binding.rvFilteredNotifications.adapter = adapter
+        attachSwipeToDismiss()
 
         binding.btnBackInbox.setOnClickListener {
             finish()
@@ -80,6 +83,7 @@ class FilteredNotificationsActivity : AppCompatActivity() {
     }
 
     private fun reloadFromStore() {
+        val previousItems = displayedItems
         allItems = store.getNotifications()
 
         if (selectedFilterPackage != null && allItems.none { it.packageName == selectedFilterPackage }) {
@@ -102,7 +106,7 @@ class FilteredNotificationsActivity : AppCompatActivity() {
         }
 
         renderAppFilterChips()
-        adapter.notifyDataSetChanged()
+        dispatchListDiff(previousItems)
 
         if (displayedItems.isEmpty()) {
             binding.rvFilteredNotifications.visibility = View.GONE
@@ -111,6 +115,69 @@ class FilteredNotificationsActivity : AppCompatActivity() {
             binding.llInboxEmpty.visibility = View.GONE
             binding.rvFilteredNotifications.visibility = View.VISIBLE
         }
+    }
+
+    /** Anima inserções/remoções (inclusive o arrastar para apagar) em vez de redesenhar a lista toda. */
+    private fun dispatchListDiff(previous: List<FilteredNotificationItem>) {
+        val current = displayedItems
+        val diff = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+            override fun getOldListSize(): Int = previous.size
+            override fun getNewListSize(): Int = current.size
+            override fun areItemsTheSame(oldPos: Int, newPos: Int): Boolean =
+                previous[oldPos].id == current[newPos].id
+
+            override fun areContentsTheSame(oldPos: Int, newPos: Int): Boolean =
+                previous[oldPos] == current[newPos]
+        })
+        diff.dispatchUpdatesTo(adapter)
+    }
+
+    /** Arraste a notificação para a esquerda ou direita para apagá-la. */
+    private fun attachSwipeToDismiss() {
+        val callback = object : ItemTouchHelper.SimpleCallback(
+            0,
+            ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT
+        ) {
+            override fun onMove(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder
+            ): Boolean = false
+
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
+                val pos = viewHolder.bindingAdapterPosition
+                val item = displayedItems.getOrNull(pos)
+                if (item == null) {
+                    if (pos >= 0) adapter.notifyItemChanged(pos)
+                    return
+                }
+                store.removeNotification(item.id)
+                FocusNotificationListenerService.syncSummaryNotification(this@FilteredNotificationsActivity)
+                reloadFromStore()
+            }
+
+            override fun onChildDraw(
+                c: android.graphics.Canvas,
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder,
+                dX: Float,
+                dY: Float,
+                actionState: Int,
+                isCurrentlyActive: Boolean
+            ) {
+                super.onChildDraw(c, recyclerView, viewHolder, dX, dY, actionState, isCurrentlyActive)
+                if (actionState == ItemTouchHelper.ACTION_STATE_SWIPE) {
+                    val width = viewHolder.itemView.width.coerceAtLeast(1)
+                    viewHolder.itemView.alpha = 1f - (kotlin.math.abs(dX) / width).coerceIn(0f, 1f)
+                }
+            }
+
+            override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+                super.clearView(recyclerView, viewHolder)
+                viewHolder.itemView.alpha = 1f
+            }
+        }
+        ItemTouchHelper(callback).attachToRecyclerView(binding.rvFilteredNotifications)
     }
 
     private fun renderAppFilterChips() {

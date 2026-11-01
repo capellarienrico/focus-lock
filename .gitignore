@@ -10,3 +10,7 @@
 local.properties
 app/build/
 *.apk
+*.p12
+*.jks
+keystore.properties
+.agents/

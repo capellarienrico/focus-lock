@@ -40,6 +40,8 @@
     <application
         android:name=".FocusLockApp"
         android:allowBackup="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@drawable/ic_focus_shield"
         android:label="@string/app_name"
         android:roundIcon="@drawable/ic_focus_shield"
@@ -72,6 +74,18 @@
         <!-- Lock Screen Activity -->
         <activity
             android:name=".LockActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:windowSoftInputMode="stateHidden|adjustResize"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@style/Theme.FocusLock.LockScreen" />
+
+        <!-- Extreme Lock Screen Activity -->
+        <activity
+            android:name=".ExtremeLockActivity"
             android:exported="false"
             android:excludeFromRecents="true"
             android:launchMode="singleTask"
@@ -133,12 +147,13 @@
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="com.focuslock.zen.ACTION_RESTART_SERVICE" />
+                <action android:name="com.focuslock.zen.ACTION_HEARTBEAT" />
                 <action android:name="com.focuslock.zen.ACTION_CLEAR_FILTERED_NOTIFICATIONS" />
             </intent-filter>
         </receiver>

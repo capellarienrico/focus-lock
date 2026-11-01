@@ -125,18 +125,6 @@ class LockActivity : AppCompatActivity() {
         val prefs = (application as FocusLockApp).prefs
         val mode = prefs.strictnessMode
 
-        if (prefs.isTimedFocusActive() && prefs.isMonkModeOnTimerEnabled) {
-            val remMins = ((prefs.getTimedFocusRemainingMillis() / 60_000L) + 1L)
-            binding.llMindfulSection.visibility = View.VISIBLE
-            binding.llPinSection.visibility = View.GONE
-            binding.btnEmergencyPinUnlock.visibility = View.GONE
-            binding.tvMindfulPrompt.text =
-                "🧘 Modo Monge Inquebrável Ativo\nSenha Mestre desabilitada até o fim da sessão (apenas Tag NFC física libera)."
-            binding.tvMindfulCountdown.visibility = View.VISIBLE
-            binding.tvMindfulCountdown.text = "⏳ Faltam cerca de $remMins min para concluir"
-            return
-        }
-
         when (mode) {
             BlockPreferences.MODE_DEEP_FOCUS_NFC -> {
                 binding.llMindfulSection.visibility = View.VISIBLE
@@ -351,7 +339,6 @@ class LockActivity : AppCompatActivity() {
         val blockedReason = intent?.getStringExtra("BLOCKED_PACKAGE") ?: ""
         val isTimeLimitBlock = blockedReason.startsWith("TIME_LIMIT:")
         prefs.isManualLockActive = false
-        prefs.stopTimedFocus()
 
         if (prefs.isDailyBudgetEnabled && !viaNfc) {
             prefs.incrementDailyOpensUsed()

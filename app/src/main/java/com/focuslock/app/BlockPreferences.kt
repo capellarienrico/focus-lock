@@ -81,56 +81,11 @@ class BlockPreferences(private val appContext: Context) {
             prefs.edit().putBoolean(KEY_COGNITIVE_CHALLENGE, value).apply()
         }
 
-    var isMonkModeOnTimerEnabled: Boolean
-        get() = prefs.getBoolean(KEY_MONK_MODE_TIMER, false)
-        set(value) {
-            prefs.edit().putBoolean(KEY_MONK_MODE_TIMER, value).apply()
-        }
-
     var customLockQuote: String
         get() = prefs.getString(KEY_CUSTOM_LOCK_QUOTE, DEFAULT_LOCK_QUOTE) ?: DEFAULT_LOCK_QUOTE
         set(value) {
             prefs.edit().putString(KEY_CUSTOM_LOCK_QUOTE, value).apply()
         }
-
-    // =========================================================================
-    // Sessão Rápida de Foco / Pomodoro Timer
-    // =========================================================================
-
-    var timedFocusUntilMillis: Long
-        get() = prefs.getLong(KEY_TIMED_FOCUS_UNTIL, 0L)
-        set(value) {
-            prefs.edit().putLong(KEY_TIMED_FOCUS_UNTIL, value).apply()
-        }
-
-    var timedFocusDurationMinutes: Int
-        get() = prefs.getInt(KEY_TIMED_FOCUS_DURATION_MINS, 25)
-        set(value) {
-            prefs.edit().putInt(KEY_TIMED_FOCUS_DURATION_MINS, value).apply()
-        }
-
-    fun startTimedFocusMinutes(minutes: Int) {
-        val until = System.currentTimeMillis() + (minutes * 60_000L)
-        cachedScheduleEvalMinute = -1L
-        prefs.edit()
-            .putLong(KEY_TIMED_FOCUS_UNTIL, until)
-            .putInt(KEY_TIMED_FOCUS_DURATION_MINS, minutes)
-            .putLong(KEY_SCHEDULE_SNOOZE_UNTIL, 0L)
-            .putLong(KEY_TIME_LIMIT_SNOOZE_UNTIL, 0L)
-            .apply()
-    }
-
-    fun stopTimedFocus() {
-        timedFocusUntilMillis = 0L
-    }
-
-    fun isTimedFocusActive(): Boolean {
-        return System.currentTimeMillis() < timedFocusUntilMillis
-    }
-
-    fun getTimedFocusRemainingMillis(): Long {
-        return (timedFocusUntilMillis - System.currentTimeMillis()).coerceAtLeast(0L)
-    }
 
     // =========================================================================
     // Limite Diário de Tempo de Tela por App (Estilo Minimalist Phone / Wellbeing)
@@ -509,12 +464,148 @@ class BlockPreferences(private val appContext: Context) {
         return active
     }
 
+    // =========================================================================
+    // Modo EXTREME (trava total; so Camera/Telefone; sai com Senha Forte ou NFC EXTREME)
+    // =========================================================================
+
+    var isExtremeActive: Boolean
+        get() = prefs.getBoolean(KEY_EXTREME_ACTIVE, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_EXTREME_ACTIVE, value).apply()
+        }
+
+    fun hasExtremePassword(): Boolean = prefs.getString(KEY_EXTREME_HASH, null) != null
+
+    /** Regras da senha forte: >= 10 caracteres, >= 3 tipos (minuscula, MAIUSCULA, digito, simbolo), != Senha Mestre. */
+    fun validateExtremePassword(pw: String): String? {
+        if (pw.length < 10) return "Use pelo menos 10 caracteres."
+        val kinds = listOf(
+            pw.any { it.isLowerCase() },
+            pw.any { it.isUpperCase() },
+            pw.any { it.isDigit() },
+            pw.any { !it.isLetterOrDigit() }
+        ).count { it }
+        if (kinds < 3) return "Misture ao menos 3 tipos: minusculas, MAIUSCULAS, numeros e simbolos."
+        if (pw == masterPin) return "A senha EXTREME deve ser diferente da Senha Mestre."
+        return null
+    }
+
+    fun setExtremePassword(pw: String) {
+        val salt = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
+        prefs.edit()
+            .putString(KEY_EXTREME_SALT, android.util.Base64.encodeToString(salt, android.util.Base64.NO_WRAP))
+            .putString(KEY_EXTREME_HASH, android.util.Base64.encodeToString(pbkdf2(pw, salt), android.util.Base64.NO_WRAP))
+            .apply()
+        resetExtremeFailures()
+    }
+
+    private fun pbkdf2(pw: String, salt: ByteArray): ByteArray {
+        val spec = javax.crypto.spec.PBEKeySpec(pw.toCharArray(), salt, 120_000, 256)
+        return javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+    }
+
+    /** Verifica a senha com limitacao de tentativas (5 erros => espera crescente). */
+    fun verifyExtremePassword(pw: String): Boolean {
+        if (extremeLockoutRemainingMs() > 0) return false
+        val saltB64 = prefs.getString(KEY_EXTREME_SALT, null) ?: return false
+        val hashB64 = prefs.getString(KEY_EXTREME_HASH, null) ?: return false
+        val salt = android.util.Base64.decode(saltB64, android.util.Base64.NO_WRAP)
+        val expected = android.util.Base64.decode(hashB64, android.util.Base64.NO_WRAP)
+        val ok = java.security.MessageDigest.isEqual(expected, pbkdf2(pw, salt))
+        if (ok) {
+            resetExtremeFailures()
+        } else {
+            val fails = prefs.getInt(KEY_EXTREME_FAILS, 0) + 1
+            val editor = prefs.edit().putInt(KEY_EXTREME_FAILS, fails)
+            if (fails >= 5) {
+                val waitSec = minOf(30L shl (fails - 5).coerceAtMost(5), 600L)
+                editor.putLong(KEY_EXTREME_LOCKOUT_UNTIL, System.currentTimeMillis() + waitSec * 1000L)
+            }
+            editor.apply()
+        }
+        return ok
+    }
+
+    fun extremeLockoutRemainingMs(): Long {
+        return (prefs.getLong(KEY_EXTREME_LOCKOUT_UNTIL, 0L) - System.currentTimeMillis()).coerceAtLeast(0L)
+    }
+
+    fun resetExtremeFailures() {
+        prefs.edit().putInt(KEY_EXTREME_FAILS, 0).putLong(KEY_EXTREME_LOCKOUT_UNTIL, 0L).apply()
+    }
+
+    fun getExtremeNfcTags(): MutableList<NfcTagProfile> {
+        val raw = prefs.getString(KEY_EXTREME_NFC_JSON, null) ?: return mutableListOf()
+        return try {
+            val arr = JSONArray(raw)
+            val list = mutableListOf<NfcTagProfile>()
+            for (i in 0 until arr.length()) {
+                val t = NfcTagProfile.fromJson(arr.getJSONObject(i))
+                if (t.uid.isNotBlank()) list.add(t)
+            }
+            list
+        } catch (_: Exception) {
+            mutableListOf()
+        }
+    }
+
+    fun saveExtremeNfcTags(tags: List<NfcTagProfile>) {
+        val arr = JSONArray()
+        tags.forEach { arr.put(it.toJson()) }
+        prefs.edit().putString(KEY_EXTREME_NFC_JSON, arr.toString()).apply()
+    }
+
+    /** Diferente das tags normais: so vale tag cadastrada explicitamente (lista vazia nao libera nada). */
+    fun isExtremeNfcTag(uid: String): Boolean {
+        return getExtremeNfcTags().any { it.uid.equals(uid, ignoreCase = true) }
+    }
+
+    @Volatile
+    private var cachedExtremeAllowed: Set<String> = emptySet()
+    @Volatile
+    private var cachedExtremeAllowedAt: Long = 0L
+
+    /** Pacotes liberados no EXTREME: Camera e Telefone/chamadas/emergencia. */
+    fun isExtremeAllowedPackage(packageName: String): Boolean {
+        if (packageName.isBlank()) return false
+        val lower = packageName.lowercase()
+        if (lower == "com.android.phone" ||
+            lower == "com.android.server.telecom" ||
+            lower.contains("dialer") ||
+            lower.contains("telecom") ||
+            lower.contains("incall") ||
+            lower.contains("emergency")
+        ) return true
+        val now = System.currentTimeMillis()
+        if (now - cachedExtremeAllowedAt > 60_000L || cachedExtremeAllowed.isEmpty()) {
+            val result = mutableSetOf<String>()
+            val pm = appContext.packageManager
+            val probes = listOf(
+                Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA),
+                Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE),
+                Intent(android.provider.MediaStore.ACTION_VIDEO_CAPTURE),
+                Intent(Intent.ACTION_DIAL)
+            )
+            for (probe in probes) {
+                try {
+                    pm.queryIntentActivities(probe, 0)
+                        .mapNotNull { it.activityInfo?.packageName }
+                        .forEach { result.add(it) }
+                } catch (_: Exception) {
+                }
+            }
+            cachedExtremeAllowed = result
+            cachedExtremeAllowedAt = now
+        }
+        return cachedExtremeAllowed.contains(packageName) || lower.contains(".camera")
+    }
+
     fun isBlockingCurrentlyActive(): Boolean {
-        return isManualLockActive || isTimedFocusActive() || isAnyScheduleActiveNow()
+        return isExtremeActive || isManualLockActive || isAnyScheduleActiveNow()
     }
 
     /**
-     * Determina se o pacote deve ser bloqueado no momento atual (bloqueio manual, timer ou horário).
+     * Determina se o pacote deve ser bloqueado no momento atual (bloqueio manual ou agendamento).
      */
     fun shouldBlockNow(packageName: String): Boolean {
         if (packageName.isBlank()) return false
@@ -526,8 +617,8 @@ class BlockPreferences(private val appContext: Context) {
 
         val globalBlockedList = getBlockedPackages()
 
-        // 2. Bloqueio Manual ou Sessão Pomodoro com Timer ativos
-        if (isManualLockActive || isTimedFocusActive()) {
+        // 2. Bloqueio Manual ativo
+        if (isManualLockActive) {
             if (globalBlockedList.isEmpty() || globalBlockedList.contains(packageName)) {
                 return true
             }
@@ -711,7 +802,6 @@ class BlockPreferences(private val appContext: Context) {
         root.put("strictnessMode", strictnessMode)
         root.put("antiTamper", isAntiTamperEnabled)
         root.put("cognitiveChallenge", isCognitiveChallengeEnabled)
-        root.put("monkModeTimer", isMonkModeOnTimerEnabled)
         root.put("customLockQuote", customLockQuote)
         root.put("dailyBudgetEnabled", isDailyBudgetEnabled)
         root.put("dailyMaxOpens", dailyMaxOpens)
@@ -733,6 +823,10 @@ class BlockPreferences(private val appContext: Context) {
         getNfcTags().forEach { tagsArr.put(it.toJson()) }
         root.put("nfcTags", tagsArr)
 
+        val extremeTagsArr = JSONArray()
+        getExtremeNfcTags().forEach { extremeTagsArr.put(it.toJson()) }
+        root.put("extremeNfcTags", extremeTagsArr)
+
         return root.toString(2)
     }
 
@@ -742,7 +836,6 @@ class BlockPreferences(private val appContext: Context) {
             strictnessMode = root.optString("strictnessMode", strictnessMode)
             isAntiTamperEnabled = root.optBoolean("antiTamper", isAntiTamperEnabled)
             isCognitiveChallengeEnabled = root.optBoolean("cognitiveChallenge", isCognitiveChallengeEnabled)
-            isMonkModeOnTimerEnabled = root.optBoolean("monkModeTimer", isMonkModeOnTimerEnabled)
             customLockQuote = root.optString("customLockQuote", customLockQuote)
             isDailyBudgetEnabled = root.optBoolean("dailyBudgetEnabled", isDailyBudgetEnabled)
             dailyMaxOpens = root.optInt("dailyMaxOpens", dailyMaxOpens)
@@ -796,6 +889,15 @@ class BlockPreferences(private val appContext: Context) {
                 }
                 saveNfcTags(list)
             }
+
+            root.optJSONArray("extremeNfcTags")?.let { arr ->
+                val list = mutableListOf<NfcTagProfile>()
+                for (i in 0 until arr.length()) {
+                    val item = NfcTagProfile.fromJson(arr.getJSONObject(i))
+                    if (item.uid.isNotBlank()) list.add(item)
+                }
+                saveExtremeNfcTags(list)
+            }
             true
         } catch (_: Exception) {
             false
@@ -837,14 +939,17 @@ class BlockPreferences(private val appContext: Context) {
         )
 
         private const val KEY_PASSWORD_CONFIGURED = "password_configured"
+        private const val KEY_EXTREME_ACTIVE = "extreme_active"
+        private const val KEY_EXTREME_HASH = "extreme_pw_hash"
+        private const val KEY_EXTREME_SALT = "extreme_pw_salt"
+        private const val KEY_EXTREME_FAILS = "extreme_pw_fails"
+        private const val KEY_EXTREME_LOCKOUT_UNTIL = "extreme_pw_lockout_until"
+        private const val KEY_EXTREME_NFC_JSON = "extreme_nfc_tags_json"
         private const val KEY_STRICTNESS_MODE = "strictness_mode"
         private const val KEY_ANTI_TAMPER = "anti_tamper_v31_enabled"
         private const val KEY_BLOCK_SHORTS_REELS = "block_shorts_reels"
         private const val KEY_COGNITIVE_CHALLENGE = "cognitive_challenge"
-        private const val KEY_MONK_MODE_TIMER = "monk_mode_timer"
         private const val KEY_CUSTOM_LOCK_QUOTE = "custom_lock_quote"
-        private const val KEY_TIMED_FOCUS_UNTIL = "timed_focus_until"
-        private const val KEY_TIMED_FOCUS_DURATION_MINS = "timed_focus_duration_mins"
         private const val KEY_DAILY_TIME_LIMIT_ENABLED = "daily_time_limit_enabled"
         private const val KEY_DAILY_TIME_LIMIT_MINUTES = "daily_time_limit_minutes"
         private const val KEY_TIME_LIMIT_SNOOZE_UNTIL = "time_limit_snooze_until"

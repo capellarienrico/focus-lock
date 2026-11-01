@@ -231,7 +231,6 @@ class LockOverlayController(
         val hadActiveSchedule = prefs.getSchedules().any { it.isActiveNow() }
         val isTimeLimitBlock = currentBlockedReason.startsWith("TIME_LIMIT:")
         prefs.isManualLockActive = false
-        prefs.stopTimedFocus()
 
         if (prefs.isDailyBudgetEnabled) {
             prefs.incrementDailyOpensUsed()
@@ -294,19 +293,6 @@ class LockOverlayController(
         b.llCognitiveSection.visibility = View.GONE
         b.llSnoozeSection.visibility = View.GONE
         b.tvError.visibility = View.GONE
-
-        // Modo Monge em Sessão com Timer: esconde a Senha Mestre completamente até o timer acabar
-        if (prefs.isTimedFocusActive() && prefs.isMonkModeOnTimerEnabled) {
-            val remMins = ((prefs.getTimedFocusRemainingMillis() / 60_000L) + 1L)
-            b.llMindfulSection.visibility = View.VISIBLE
-            b.llPinSection.visibility = View.GONE
-            b.btnEmergencyPinUnlock.visibility = View.GONE
-            b.tvMindfulPrompt.text =
-                "🧘 Modo Monge Inquebrável Ativo\nSenha Mestre desabilitada até o fim da sessão (apenas Tag NFC física libera)."
-            b.tvMindfulCountdown.visibility = View.VISIBLE
-            b.tvMindfulCountdown.text = "⏳ Faltam cerca de $remMins min para concluir"
-            return
-        }
 
         when (mode) {
             BlockPreferences.MODE_DEEP_FOCUS_NFC -> {

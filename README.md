@@ -1,10 +1,20 @@
-# FocusLock v3.0 🛡️ — Super App de Foco & Minimalismo Digital
+# FocusLock v3.4 🛡️ — Super App de Foco & Minimalismo Digital
 
-Aplicativo Android nativo (Kotlin) completo para **bloqueio real de distrações**, **filtro minimalista de notificações**, **sessões Pomodoro / Modo Monge**, **controle de tempo de tela** e **âncora física via Tag NFC** — projetado para ser **100% compatível com aplicativos de banco** (sem utilizar `AccessibilityService`).
+Aplicativo Android nativo (Kotlin) completo para **bloqueio real de distrações**, **Modo EXTREME de bloqueio total**, **filtro minimalista de notificações**, **controle de tempo de tela** e **âncora física via Tag NFC** — projetado para ser **100% compatível com aplicativos de banco** (sem utilizar `AccessibilityService`).
 
 ---
 
-## ✨ O que há de novo no FocusLock v3.0 (Super App Edition)
+## ✨ O que há de novo no FocusLock v3.4 (Extreme Mode Edition)
+
+### 🔥 Modo EXTREME (Bloqueio Total do Aparelho)
+- **Celular 100% Travado**: bloqueia todo o aparelho instantaneamente, permitindo **exclusivamente a Câmera e o Telefone/chamadas de emergência**.
+- **Chave de Saída Forte e Independente**: a Senha Mestre comum **não** desbloqueia o Modo EXTREME. Apenas uma **Senha Forte EXTREME** (mínimo 10 caracteres misturando maiúsculas, minúsculas, números e símbolos) ou uma **Tag NFC EXTREME dedicada** cadastrada à parte consegue desativar o bloqueio.
+- **Proteção Anti-Força Bruta**: tentativas erradas consecutivas ativam atraso progressivo (30s até 10 minutos).
+- **Ativação / Desativação Ágil**: toque na Tag NFC EXTREME para alternar o modo a qualquer momento ou utilize o botão com confirmação no app / atalho no Quick Tile.
+
+---
+
+## ✨ Funcionalidades do FocusLock Super App
 
 ### 1. 🔒 Motor de Bloqueio Real via Sobreposição (`WindowManager Overlay`)
 - **Imune às restrições do Android 14, 15 e 16 (Samsung OneUI, Xiaomi HyperOS, Motorola, Pixel)**: exibe instantaneamente uma janela de sobreposição em tela cheia (`TYPE_APPLICATION_OVERLAY`) assim que um app restrito entra em primeiro plano, sem depender de *Background Activity Launch (BAL)*.
@@ -28,15 +38,11 @@ Aplicativo Android nativo (Kotlin) completo para **bloqueio real de distrações
   - ✅ **Selecionados Primeiro**
 - Busca instantânea + botão de **Marcar/Desmarcar todos os visíveis** da categoria filtrada.
 
-### 4. ⏱️ Sessões Rápidas de Foco (Pomodoro) & 🧘 Modo Monge
-- Inicie sessões cronometradas com 1 toque (**25 min**, **45 min**, **1h** ou duração personalizada) com desbloqueio automático e alerta ao concluir.
-- **Modo Monge em Sessões Cronometradas**: opcionalmente oculta o desbloqueio por Senha Mestre enquanto o cronômetro estiver rodando (apenas a Tag NFC física ou o fim do timer libera).
-
-### 5. ⏳ Limite Diário de Tempo de Tela por App + Orçamento de Sonecas
+### 4. ⏳ Limite Diário de Tempo de Tela por App + Orçamento de Sonecas
 - Defina uma cota diária de uso (ex: 30 min/dia) para apps específicos — mesmo fora de horários agendados, o FocusLock bloqueia automaticamente ao atingir o limite do dia.
 - **Pausa Consciente & Desafio Cognitivo**: respiração guiada antes de abrir sonecas de 1/5/10/15 min ou exigir Senha Mestre, com limite diário de sonecas e proteção anti-desinstalação.
 
-### 6. 📊 Painel de Bem-Estar Digital & Backup JSON
+### 5. 📊 Painel de Bem-Estar Digital & Backup JSON
 - Resumo na tela principal com **Tempo de Tela Hoje**, **Tentativas Bloqueadas**, **Notificações Filtradas Hoje** e **Top 5 Apps Mais Usados** (com botão de bloquear em 1 toque).
 - **Diagnóstico de Saúde do Sistema** em tempo real e **Exportação / Importação completa em JSON** (rotinas, listas de apps e preferências).
 

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+: exclui a caixa de notificacoes filtradas de backups na nuvem e transferencia entre aparelhos. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="focus_lock_notif_inbox.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="focus_lock_notif_inbox.xml" />
+    </device-transfer>
+</data-extraction-rules>

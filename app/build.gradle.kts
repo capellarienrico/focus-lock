@@ -3,6 +3,20 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Credenciais de assinatura NUNCA ficam no repositório.
+// Fornecidas por variáveis de ambiente (CI) ou por ~/.gradle/gradle.properties / -P (local):
+//   FOCUSLOCK_KEYSTORE_FILE, FOCUSLOCK_KEYSTORE_PASSWORD, FOCUSLOCK_KEY_ALIAS, FOCUSLOCK_KEY_PASSWORD
+// Se FOCUSLOCK_KEYSTORE_FILE não for definido, usa app/release.p12 (ignorado pelo git) quando existir.
+fun signingProp(name: String): String? =
+    (System.getenv(name) ?: (project.findProperty(name) as String?))?.takeIf { it.isNotBlank() }
+
+val releaseKeystore: File? = (signingProp("FOCUSLOCK_KEYSTORE_FILE")?.let { file(it) }
+    ?: file("release.p12")).takeIf { it.exists() }
+val releaseStorePassword = signingProp("FOCUSLOCK_KEYSTORE_PASSWORD")
+val releaseKeyAlias = signingProp("FOCUSLOCK_KEY_ALIAS") ?: "focuslock_key"
+val releaseKeyPassword = signingProp("FOCUSLOCK_KEY_PASSWORD") ?: releaseStorePassword
+val hasReleaseSigning = releaseKeystore != null && releaseStorePassword != null
+
 android {
     namespace = "com.focuslock.app"
     compileSdk = 34
@@ -11,19 +25,18 @@ android {
         applicationId = "com.focuslock.zen"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "3.3"
+        versionCode = 8
+        versionName = "3.4"
     }
 
     signingConfigs {
-        create("releaseKey") {
-            val ksFile = file("release.p12")
-            if (ksFile.exists()) {
-                storeFile = ksFile
+        if (hasReleaseSigning) {
+            create("releaseKey") {
+                storeFile = releaseKeystore
                 storeType = "PKCS12"
-                storePassword = "focuslock_release_2026"
-                keyAlias = "focuslock_key"
-                keyPassword = "focuslock_release_2026"
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
             }
         }
     }
@@ -33,8 +46,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             isDebuggable = false
-            val ksFile = file("release.p12")
-            signingConfig = if (ksFile.exists()) {
+            signingConfig = if (hasReleaseSigning) {
                 signingConfigs.getByName("releaseKey")
             } else {
                 signingConfigs.getByName("debug")
@@ -45,8 +57,7 @@ android {
             )
         }
         debug {
-            val ksFile = file("release.p12")
-            if (ksFile.exists()) {
+            if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("releaseKey")
             }
         }

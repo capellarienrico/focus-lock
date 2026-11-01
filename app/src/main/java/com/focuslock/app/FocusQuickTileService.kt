@@ -15,7 +15,7 @@ import android.widget.Toast
  * Botão na Barra de Configurações Rápidas do Android (Quick Settings Tile).
  *
  * - Consome 0% de bateria em segundo plano (gerenciado sob demanda pela SystemUI do Android).
- * - Quando desbloqueado: inicia instantaneamente uma sessão rápida de foco (25 min Pomodoro) com 1 toque.
+ * - Quando desbloqueado: ativa o bloqueio manual instantaneamente com 1 toque.
  * - Quando bloqueado: exibe status ativo e abre o FocusLock (nunca desbloqueia sem Senha Mestre / Tag NFC).
  */
 class FocusQuickTileService : TileService() {
@@ -28,6 +28,16 @@ class FocusQuickTileService : TileService() {
     override fun onClick() {
         super.onClick()
         val prefs = (application as? FocusLockApp)?.prefs ?: BlockPreferences(applicationContext)
+
+        if (prefs.isExtremeActive) {
+            Toast.makeText(
+                this,
+                "🔥 Modo EXTREME ativo! Use a Senha Forte EXTREME ou Tag NFC EXTREME para desbloquear.",
+                Toast.LENGTH_LONG
+            ).show()
+            ExtremeMode.openLockScreen(this)
+            return
+        }
 
         if (prefs.isBlockingCurrentlyActive()) {
             Toast.makeText(
@@ -53,18 +63,13 @@ class FocusQuickTileService : TileService() {
             return
         }
 
-        val mins = prefs.timedFocusDurationMinutes.takeIf { it in 5..240 } ?: 25
-        prefs.startTimedFocusMinutes(mins)
+        prefs.isManualLockActive = true
         AppBlockerService.ensureRunning(this)
         AppBlockerService.notifyStateChanged()
         FocusNotificationListenerService.syncSummaryNotification(this)
         refreshTileVisuals()
 
-        Toast.makeText(
-            this,
-            "⏳ Sessão de foco iniciada por $mins min!",
-            Toast.LENGTH_SHORT
-        ).show()
+        Toast.makeText(this, "Bloqueio ativado!", Toast.LENGTH_SHORT).show()
     }
 
     private fun openMainActivityAndCollapse() {
@@ -98,23 +103,23 @@ class FocusQuickTileService : TileService() {
         val isActive = prefs.isBlockingCurrentlyActive()
 
         tile.icon = Icon.createWithResource(this, R.drawable.ic_focus_shield)
-        if (isActive) {
+        if (prefs.isExtremeActive) {
+            tile.state = Tile.STATE_ACTIVE
+            tile.label = "🔥 EXTREME"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                tile.subtitle = "Celular Travado"
+            }
+        } else if (isActive) {
             tile.state = Tile.STATE_ACTIVE
             tile.label = "Foco Ativo"
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                tile.subtitle = if (prefs.isTimedFocusActive()) {
-                    val remMins = ((prefs.getTimedFocusRemainingMillis() / 60_000L) + 1L)
-                    "${remMins}m restantes"
-                } else {
-                    "Protegido"
-                }
+                tile.subtitle = "Protegido"
             }
         } else {
-            val defaultMins = prefs.timedFocusDurationMinutes.takeIf { it in 5..240 } ?: 25
             tile.state = Tile.STATE_INACTIVE
             tile.label = "FocusLock"
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                tile.subtitle = "Iniciar ${defaultMins}m"
+                tile.subtitle = "Ativar bloqueio"
             }
         }
         tile.updateTile()

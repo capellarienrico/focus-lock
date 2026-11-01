@@ -27,11 +27,16 @@ class FocusNotificationListenerService : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         isConnected = true
+        // Religa o monitor de bloqueio caso o processo tenha sido morto e só o listener tenha voltado
+        AppBlockerService.ensureRunning(applicationContext)
+        ServiceHeartbeat.schedule(applicationContext)
         syncSummaryNotification(applicationContext)
     }
 
     override fun onListenerDisconnected() {
         isConnected = false
+        // O sistema às vezes desconecta o listener e não o religa sozinho: pede rebind explicitamente
+        ServiceHeartbeat.requestListenerRebindIfNeeded(applicationContext)
         super.onListenerDisconnected()
     }
 

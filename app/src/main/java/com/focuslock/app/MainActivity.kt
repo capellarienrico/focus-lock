@@ -60,6 +60,8 @@ class MainActivity : AppCompatActivity() {
     private var nfcAdapter: NfcAdapter? = null
     private var pendingIntent: PendingIntent? = null
     private var isWaitingForNfcRegistration = false
+    private var isWaitingForExtremeNfcRegistration = false
+    private var pendingExtremeNfcTagName: String = "Tag EXTREME"
     private var isFirstSetupDialogShowing = false
     private var hasPromptedNotifications = false
 
@@ -71,25 +73,6 @@ class MainActivity : AppCompatActivity() {
         if (!isFinishing && !isDestroyed) {
             updateNotificationFilterUI()
             binding.tvKpiFilteredToday.text = notifStore.getFilteredCountToday().toString()
-        }
-    }
-
-    private val uiTickRunnable = object : Runnable {
-        override fun run() {
-            if (!isFinishing && !isDestroyed && isResumed) {
-                if (prefs.isTimedFocusActive()) {
-                    val remMs = prefs.getTimedFocusRemainingMillis()
-                    val totalSec = remMs / 1000L
-                    val mins = totalSec / 60L
-                    val secs = totalSec % 60L
-                    binding.tvLockStatus.text =
-                        String.format(Locale.US, "⏳ SESSÃO DE FOCO: %02d:%02d", mins, secs)
-                    uiHandler.postDelayed(this, 1000L)
-                } else if (prefs.timedFocusUntilMillis > 0L) {
-                    prefs.stopTimedFocus()
-                    updateUI()
-                }
-            }
         }
     }
 
@@ -188,14 +171,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         isResumed = false
-        uiHandler.removeCallbacks(uiTickRunnable)
         notifStore.removeListener(notifStoreListener)
         super.onPause()
         nfcAdapter?.disableForegroundDispatch(this)
     }
 
     override fun onDestroy() {
-        uiHandler.removeCallbacks(uiTickRunnable)
         wellbeingExecutor.shutdownNow()
         super.onDestroy()
     }
@@ -362,6 +343,20 @@ class MainActivity : AppCompatActivity() {
     private fun handleNfcTag(tag: Tag) {
         val tagId = bytesToHex(tag.id)
 
+        if (isWaitingForExtremeNfcRegistration) {
+            isWaitingForExtremeNfcRegistration = false
+            val currentTags = prefs.getExtremeNfcTags().filterNot { it.uid.equals(tagId, ignoreCase = true) }.toMutableList()
+            currentTags.add(NfcTagProfile(uid = tagId, name = pendingExtremeNfcTagName))
+            prefs.saveExtremeNfcTags(currentTags)
+            Toast.makeText(
+                this,
+                "Tag EXTREME \"$pendingExtremeNfcTagName\" vinculada! UID: $tagId",
+                Toast.LENGTH_LONG
+            ).show()
+            updateUI()
+            return
+        }
+
         if (isWaitingForNfcRegistration) {
             isWaitingForNfcRegistration = false
             val currentTags = prefs.getNfcTags().filterNot { it.uid.equals(tagId, ignoreCase = true) }.toMutableList()
@@ -376,12 +371,18 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        // Se for a Tag NFC EXTREME, aciona o toggle do Modo EXTREME
+        if (prefs.isExtremeNfcTag(tagId)) {
+            ExtremeMode.handleTag(this, tagId)
+            updateUI()
+            return
+        }
+
         if (prefs.isNfcTagAllowed(tagId)) {
             val tagName = prefs.findNfcTagName(tagId) ?: "Tag NFC"
             if (prefs.isBlockingCurrentlyActive()) {
                 val hadSchedule = prefs.isAnyScheduleActiveNow()
                 prefs.isManualLockActive = false
-                prefs.stopTimedFocus()
                 if (hadSchedule) {
                     prefs.snoozeSchedulesForMinutes(15)
                 }
@@ -511,23 +512,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupListeners() {
+        setupExtremeListeners()
         binding.tvHeaderFilteredPill.setOnClickListener {
             startActivity(Intent(this, FilteredNotificationsActivity::class.java))
         }
 
         binding.btnToggleLock.setOnClickListener {
             if (prefs.isBlockingCurrentlyActive()) {
-                if (prefs.isTimedFocusActive() && prefs.isMonkModeOnTimerEnabled) {
-                    val remMins = (prefs.getTimedFocusRemainingMillis() / 60_000L) + 1L
-                    AlertDialog.Builder(this)
-                        .setTitle("🧘 Modo Monge Inquebrável Ativo")
-                        .setMessage(
-                            "A Senha Mestre está desabilitada até o fim desta sessão com timer (faltam cerca de $remMins min).\n\nAproxime sua Tag NFC física caso precise desbloquear antes."
-                        )
-                        .setPositiveButton("Manter o Foco", null)
-                        .show()
-                    return@setOnClickListener
-                }
                 promptPinToUnlock()
             } else {
                 if (!ensureAccessibilityBeforeLock()) return@setOnClickListener
@@ -539,12 +530,6 @@ class MainActivity : AppCompatActivity() {
                 updateUI()
             }
         }
-
-        // Sessões Rápidas com Timer (Pomodoro)
-        binding.btnTimer25m.setOnClickListener { startQuickTimedSession(25) }
-        binding.btnTimer45m.setOnClickListener { startQuickTimedSession(45) }
-        binding.btnTimer60m.setOnClickListener { startQuickTimedSession(60) }
-        binding.btnTimerCustom.setOnClickListener { showCustomTimerDialog() }
 
         binding.btnRefreshUsageStats.setOnClickListener {
             refreshWellbeingAsync()
@@ -808,21 +793,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        binding.switchMonkModeTimer.setOnClickListener {
-            val target = binding.switchMonkModeTimer.isChecked
-            if (!target && prefs.isTimedFocusActive()) {
-                binding.switchMonkModeTimer.isChecked = true
-                Toast.makeText(this, "O Modo Monge não pode ser desligado durante uma sessão com timer ativa!", Toast.LENGTH_LONG).show()
-                return@setOnClickListener
-            }
-            prefs.isMonkModeOnTimerEnabled = target
-            Toast.makeText(
-                this,
-                if (target) "Modo Monge ativado para sessões com timer!" else "Modo Monge desativado.",
-                Toast.LENGTH_SHORT
-            ).show()
-        }
-
         binding.switchAntiTamper.setOnClickListener {
             val target = binding.switchAntiTamper.isChecked
             if (!target && prefs.isBlockingCurrentlyActive()) {
@@ -912,40 +882,6 @@ class MainActivity : AppCompatActivity() {
                 showImportBackupDialog()
             }
         }
-    }
-
-    private fun startQuickTimedSession(minutes: Int) {
-        if (!ensureAccessibilityBeforeLock()) return
-        prefs.startTimedFocusMinutes(minutes)
-        AppBlockerService.ensureRunning(this)
-        AppBlockerService.notifyStateChanged()
-        FocusNotificationListenerService.syncSummaryNotification(this)
-        Toast.makeText(
-            this,
-            "⏳ Sessão de foco iniciada por $minutes min!",
-            Toast.LENGTH_SHORT
-        ).show()
-        updateUI()
-    }
-
-    private fun showCustomTimerDialog() {
-        val options = arrayOf(
-            "15 minutos (Sprint curto)",
-            "25 minutos (Pomodoro clássico)",
-            "45 minutos (Deep Work)",
-            "60 minutos (1 hora)",
-            "90 minutos (1h 30m)",
-            "120 minutos (2 horas)",
-            "180 minutos (3 horas)"
-        )
-        val mins = intArrayOf(15, 25, 45, 60, 90, 120, 180)
-        AlertDialog.Builder(this)
-            .setTitle("Iniciar Sessão de Foco com Timer")
-            .setItems(options) { _, which ->
-                startQuickTimedSession(mins[which])
-            }
-            .setNegativeButton("Cancelar", null)
-            .show()
     }
 
     private fun showImportBackupDialog() {
@@ -1818,7 +1754,6 @@ class MainActivity : AppCompatActivity() {
         verifyPasswordThen("Insira sua Senha Mestre alfanumérica para liberar os aplicativos:") {
             val hadSchedule = prefs.isAnyScheduleActiveNow()
             prefs.isManualLockActive = false
-            prefs.stopTimedFocus()
             if (hadSchedule) {
                 val options = arrayOf(
                     "1 minuto (Olhada rápida - ScreenZen)",
@@ -2062,26 +1997,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateUI() {
-        uiHandler.removeCallbacks(uiTickRunnable)
         val isManual = prefs.isManualLockActive
-        val isTimed = prefs.isTimedFocusActive()
         val isScheduleActive = prefs.isAnyScheduleActiveNow()
-        val isLocked = isManual || isTimed || isScheduleActive
+        val isLocked = isManual || isScheduleActive
         val blockedCount = prefs.getBlockedPackages().size
 
         if (isLocked) {
             binding.ivLockStatus.setImageResource(R.drawable.ic_lock)
             binding.ivLockStatus.setColorFilter(ContextCompat.getColor(this, R.color.accent_red))
-            if (isTimed) {
-                val remSec = prefs.getTimedFocusRemainingMillis() / 1000L
-                binding.tvLockStatus.text = String.format(
-                    Locale.US,
-                    "⏳ SESSÃO DE FOCO: %02d:%02d",
-                    remSec / 60L,
-                    remSec % 60L
-                )
-                uiHandler.postDelayed(uiTickRunnable, 1000L)
-            } else if (isManual) {
+            if (isManual) {
                 binding.tvLockStatus.text = "STATUS: BLOQUEIO MANUAL ATIVO"
             } else {
                 binding.tvLockStatus.text = "STATUS: HORÁRIO DE FOCO ATIVO"
@@ -2092,14 +2016,9 @@ class MainActivity : AppCompatActivity() {
             } else {
                 "$blockedCount aplicativo(s) selecionado(s) bloqueado(s)"
             }
-            binding.btnToggleLock.text = if (isTimed && prefs.isMonkModeOnTimerEnabled) {
-                "🧘 MODO MONGE ATIVO (SÓ TAG NFC)"
-            } else {
-                "DESBLOQUEAR (EXIGE SENHA MESTRE)"
-            }
+            binding.btnToggleLock.text = "DESBLOQUEAR (EXIGE SENHA MESTRE)"
             binding.btnToggleLock.backgroundTintList =
                 ContextCompat.getColorStateList(this, R.color.accent_red)
-            binding.llQuickTimersSection.visibility = View.GONE
         } else {
             binding.ivLockStatus.setImageResource(R.drawable.ic_focus_shield)
             binding.ivLockStatus.setColorFilter(ContextCompat.getColor(this, R.color.accent_green))
@@ -2109,7 +2028,6 @@ class MainActivity : AppCompatActivity() {
             binding.btnToggleLock.text = "ATIVAR BLOQUEIO AGORA"
             binding.btnToggleLock.backgroundTintList =
                 ContextCompat.getColorStateList(this, R.color.accent_blue)
-            binding.llQuickTimersSection.visibility = View.VISIBLE
         }
 
         val nfcTags = prefs.getNfcTags()
@@ -2145,7 +2063,6 @@ class MainActivity : AppCompatActivity() {
             BlockPreferences.MODE_MINDFUL_DELAY -> "Modo Atual: Pausa Consciente — ScreenZen (Espera de 15s)"
             else -> "Modo Atual: Normal (Senha Mestre ou NFC imediato)"
         }
-        binding.switchMonkModeTimer.isChecked = prefs.isMonkModeOnTimerEnabled
         binding.switchAntiTamper.isChecked = prefs.isAntiTamperEnabled
         binding.switchCognitiveChallenge.isChecked = prefs.isCognitiveChallengeEnabled
         binding.tvCustomQuotePreview.text = "Frase de foco: \"${prefs.customLockQuote}\""
@@ -2161,6 +2078,306 @@ class MainActivity : AppCompatActivity() {
         updateNotificationFilterUI()
         renderSchedulesList()
         updateSystemDiagnosticsCard()
+        updateExtremeUI()
+    }
+
+    private fun setupExtremeListeners() {
+        binding.btnToggleExtreme.setOnClickListener {
+            if (prefs.isExtremeActive) {
+                showDeactivateExtremeDialog()
+            } else {
+                showActivateExtremeConfirmationDialog()
+            }
+        }
+
+        binding.btnConfigExtremePassword.setOnClickListener {
+            showConfigureExtremePasswordDialog()
+        }
+
+        binding.btnRegisterExtremeNfc.setOnClickListener {
+            showManageExtremeNfcDialog()
+        }
+    }
+
+    private fun updateExtremeUI() {
+        val isExtreme = prefs.isExtremeActive
+        val hasExtPw = prefs.hasExtremePassword()
+        val extTags = prefs.getExtremeNfcTags()
+
+        if (isExtreme) {
+            binding.tvExtremeBadge.text = "ATIVO"
+            binding.tvExtremeBadge.setTextColor(ContextCompat.getColor(this, R.color.accent_red))
+            binding.btnToggleExtreme.text = "Desativar Modo EXTREME"
+            binding.btnToggleExtreme.backgroundTintList =
+                ContextCompat.getColorStateList(this, R.color.accent_red)
+        } else {
+            binding.tvExtremeBadge.text = "INATIVO"
+            binding.tvExtremeBadge.setTextColor(ContextCompat.getColor(this, R.color.text_secondary))
+            binding.btnToggleExtreme.text = "🔥 Ativar Modo EXTREME"
+            binding.btnToggleExtreme.backgroundTintList =
+                ContextCompat.getColorStateList(this, R.color.accent_red)
+        }
+
+        val pwDesc = if (hasExtPw) "Senha Forte: Configurada" else "Senha Forte: NÃO DEFINIDA"
+        val nfcDesc = if (extTags.isNotEmpty()) "NFC EXTREME: ${extTags.size} tag(s)" else "NFC EXTREME: Nenhuma tag"
+        binding.tvExtremeStatusDetails.text = "$pwDesc • $nfcDesc"
+        if (!hasExtPw) {
+            binding.tvExtremeStatusDetails.setTextColor(ContextCompat.getColor(this, R.color.accent_red))
+        } else {
+            binding.tvExtremeStatusDetails.setTextColor(ContextCompat.getColor(this, R.color.accent_green))
+        }
+    }
+
+    private fun showActivateExtremeConfirmationDialog() {
+        if (!prefs.hasExtremePassword()) {
+            Toast.makeText(this, "Defina a Senha Forte EXTREME antes de ativar!", Toast.LENGTH_LONG).show()
+            showConfigureExtremePasswordDialog()
+            return
+        }
+        if (!ensureAccessibilityBeforeLock()) return
+
+        AlertDialog.Builder(this)
+            .setTitle("🔥 ATIVAR MODO EXTREME?")
+            .setMessage(
+                "ATENÇÃO: O celular todo será IMEDIATAMENTE travado!\n\n" +
+                "• Apenas Câmera e Telefone/chamadas funcionarão.\n" +
+                "• NENHUM outro app poderá ser aberto.\n" +
+                "• A Senha Mestre comum NÃO desativa este modo.\n" +
+                "• Para sair, você DEVE digitar a Senha Forte EXTREME ou aproximar sua Tag NFC EXTREME.\n\n" +
+                "Tem certeza que deseja ativar o bloqueio total agora?"
+            )
+            .setPositiveButton("Sim, Ativar Bloqueio Total") { _, _ ->
+                val err = ExtremeMode.activate(this)
+                if (err != null) {
+                    Toast.makeText(this, err, Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(this, "Modo EXTREME ATIVADO!", Toast.LENGTH_SHORT).show()
+                    updateUI()
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun showDeactivateExtremeDialog() {
+        val remaining = prefs.extremeLockoutRemainingMs()
+        if (remaining > 0) {
+            Toast.makeText(this, "Muitas tentativas erradas. Aguarde ${remaining / 1000 + 1}s.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val input = EditText(this).apply {
+            hint = "Senha Forte EXTREME"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+        }
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpToPx(20), dpToPx(10), dpToPx(20), dpToPx(10))
+            addView(input)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Desativar Modo EXTREME")
+            .setMessage("Digite a Senha Forte EXTREME (ou aproxime sua Tag NFC EXTREME):")
+            .setView(container)
+            .setPositiveButton("Desativar") { _, _ ->
+                val pw = input.text?.toString() ?: ""
+                if (prefs.verifyExtremePassword(pw)) {
+                    ExtremeMode.deactivate(this)
+                    Toast.makeText(this, "Modo EXTREME desativado!", Toast.LENGTH_SHORT).show()
+                    updateUI()
+                } else {
+                    Toast.makeText(this, "Senha incorreta!", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun showConfigureExtremePasswordDialog() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = dpToPx(20)
+            setPadding(pad, dpToPx(12), pad, dpToPx(4))
+        }
+
+        val info = TextView(this).apply {
+            text = "A Senha Forte EXTREME é usada para desbloquear o Modo EXTREME. Deve ter no mínimo 10 caracteres, mesclar letras (maiúsculas e minúsculas), números e símbolos, e ser DIFERENTE da Senha Mestre."
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+            textSize = 13f
+        }
+
+        val inputPass = EditText(this).apply {
+            hint = "Nova Senha Forte (mín 10 caracteres)"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+        }
+
+        val inputConfirm = EditText(this).apply {
+            hint = "Confirme a Senha Forte"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+        }
+
+        val cbShow = CheckBox(this).apply {
+            text = "Mostrar senhas"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+            setOnCheckedChangeListener { _, isChecked ->
+                val method = if (isChecked) HideReturnsTransformationMethod.getInstance() else PasswordTransformationMethod.getInstance()
+                inputPass.transformationMethod = method
+                inputConfirm.transformationMethod = method
+            }
+        }
+
+        val btnGen = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = "Gerar Senha Forte Aleatória e Copiar"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accent_green))
+            textSize = 12f
+            setOnClickListener {
+                val gen = generateStrongExtremePassword()
+                inputPass.setText(gen)
+                inputConfirm.setText(gen)
+                cbShow.isChecked = true
+                copyPasswordToClipboard(gen)
+                Toast.makeText(this@MainActivity, "Senha copiada para a área de transferência!", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        container.addView(info)
+        container.addView(inputPass)
+        container.addView(inputConfirm)
+        container.addView(cbShow)
+        container.addView(btnGen)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Configurar Senha Forte EXTREME")
+            .setView(container)
+            .setPositiveButton("Salvar Senha", null)
+            .setNegativeButton("Cancelar", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val p1 = inputPass.text?.toString() ?: ""
+                val p2 = inputConfirm.text?.toString() ?: ""
+                if (p1 != p2) {
+                    inputConfirm.error = "As senhas não coincidem"
+                    return@setOnClickListener
+                }
+                val validationError = prefs.validateExtremePassword(p1)
+                if (validationError != null) {
+                    inputPass.error = validationError
+                    return@setOnClickListener
+                }
+                prefs.setExtremePassword(p1)
+                Toast.makeText(this, "Senha Forte EXTREME configurada com sucesso!", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+                updateUI()
+            }
+        }
+
+        dialog.show()
+    }
+
+    private fun generateStrongExtremePassword(): String {
+        val upper = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+        val lower = "abcdefghijkmnopqrstuvwxyz"
+        val digits = "23456789"
+        val special = "!@#$%^&*()-_=+"
+        val rand = SecureRandom()
+        val chars = mutableListOf(
+            upper[rand.nextInt(upper.length)],
+            upper[rand.nextInt(upper.length)],
+            lower[rand.nextInt(lower.length)],
+            lower[rand.nextInt(lower.length)],
+            digits[rand.nextInt(digits.length)],
+            digits[rand.nextInt(digits.length)],
+            special[rand.nextInt(special.length)],
+            special[rand.nextInt(special.length)]
+        )
+        val all = upper + lower + digits + special
+        while (chars.size < 14) {
+            chars.add(all[rand.nextInt(all.length)])
+        }
+        chars.shuffle(rand)
+        return chars.joinToString("")
+    }
+
+    private fun showManageExtremeNfcDialog() {
+        val tags = prefs.getExtremeNfcTags()
+        if (tags.isEmpty()) {
+            promptNewExtremeNfcTagName()
+            return
+        }
+
+        val tagNames = tags.map { "${it.name} (${it.uid})" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Tags NFC EXTREME (${tags.size})")
+            .setItems(tagNames) { _, which ->
+                val selected = tags[which]
+                AlertDialog.Builder(this)
+                    .setTitle("Excluir Tag EXTREME")
+                    .setMessage("Deseja desvincular a tag \"${selected.name}\"?")
+                    .setPositiveButton("Excluir") { _, _ ->
+                        val updated = tags.filterNot { it.uid.equals(selected.uid, ignoreCase = true) }
+                        prefs.saveExtremeNfcTags(updated)
+                        Toast.makeText(this, "Tag removida.", Toast.LENGTH_SHORT).show()
+                        updateUI()
+                    }
+                    .setNegativeButton("Cancelar", null)
+                    .show()
+            }
+            .setPositiveButton("+ Cadastrar Outra Tag") { _, _ ->
+                promptNewExtremeNfcTagName()
+            }
+            .setNegativeButton("Fechar", null)
+            .show()
+    }
+
+    private fun promptNewExtremeNfcTagName() {
+        if (nfcAdapter == null) {
+            Toast.makeText(this, "Este aparelho não possui leitor NFC.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!nfcAdapter!!.isEnabled) {
+            Toast.makeText(this, "NFC desligado. Ative nas configurações primeiro.", Toast.LENGTH_SHORT).show()
+            startActivity(Intent(Settings.ACTION_NFC_SETTINGS))
+            return
+        }
+
+        val input = EditText(this).apply {
+            hint = "Nome (ex: Chaveiro EXTREME)"
+            setText("Tag EXTREME")
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_white))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+        }
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpToPx(20), dpToPx(10), dpToPx(20), dpToPx(10))
+            addView(input)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Cadastrar Tag NFC EXTREME")
+            .setMessage("Escolha um identificador e aproxime a OUTRA Tag NFC da traseira do aparelho:")
+            .setView(container)
+            .setPositiveButton("Aguardar Tag...") { _, _ ->
+                pendingExtremeNfcTagName = input.text?.toString()?.trim().takeUnless { it.isNullOrBlank() } ?: "Tag EXTREME"
+                isWaitingForExtremeNfcRegistration = true
+                Toast.makeText(
+                    this,
+                    "Aproxime a tag \"$pendingExtremeNfcTagName\" da traseira do celular agora...",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
     }
 
     private fun updateSystemDiagnosticsCard() {
