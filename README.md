@@ -50,7 +50,7 @@ Aplicativo Android nativo (Kotlin) completo para **bloqueio real de distrações
 
 ## 📲 Como Instalar e Configurar
 
-1. Baixe o **`FocusLock.apk`** mais recente em [**GitHub Releases (v3.0)**](https://github.com/capellarienrico/focus-lock/releases/latest) *(se você instalou uma versão anterior com assinatura diferente, desinstale a antiga antes de instalar)*.
+1. Baixe o **`FocusLock.apk`** mais recente em [**GitHub Releases (v3.4)**](https://github.com/capellarienrico/focus-lock/releases/latest) *(se você instalou uma versão anterior com assinatura diferente, desinstale a antiga antes de instalar)*.
 2. Abra o app e crie sua **Senha Mestre**.
 3. Conceda as permissões indicadas no painel:
    - **Acesso ao Uso de Apps** (detectar app em primeiro plano e calcular tempo de tela).
