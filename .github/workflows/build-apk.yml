@@ -58,17 +58,17 @@ jobs:
           name: FocusLock-Debug-APK
           path: app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Publish GitHub Release v3.4
+      - name: Publish GitHub Release v3.5
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if gh release view v3.4 >/dev/null 2>&1; then
-            gh release upload v3.4 FocusLock.apk --clobber
+          if gh release view v3.5 >/dev/null 2>&1; then
+            gh release upload v3.5 FocusLock.apk --clobber
           else
-            gh release create v3.4 FocusLock.apk \
-              --title "FocusLock v3.4 — Modo EXTREME (Bloqueio Total do Aparelho) & Heartbeat Anti-Crash" \
-              --notes "FocusLock v3.4 APK assinado com a chave oficial! Novidades desta versão: (1) Modo EXTREME de Bloqueio Total: celular 100% travado instantaneamente, liberando exclusivamente a Câmera e o Telefone/discador de emergência; (2) Chave de Saída Forte e Independente: a Senha Mestre comum não desbloqueia o modo EXTREME — exige uma Senha Forte EXTREME (mínimo 10 caracteres mesclando maiúsculas, minúsculas, dígitos e símbolos com proteção anti-força bruta) ou uma Tag NFC EXTREME dedicada; (3) Alternância Rápida via NFC: encostar a Tag NFC EXTREME ativa ou desativa o modo de qualquer tela; (4) Heartbeat de Auto-Recuperação: serviço em segundo plano auto-regenerativo contra encerramento forçado do sistema operacional (Samsung OneUI, Xiaomi HyperOS, etc.)." \
+            gh release create v3.5 FocusLock.apk \
+              --title "FocusLock v3.5 — Modo EXTREME Nativo (Zero Overlay na Tela Inicial, Câmera e NFC Livres)" \
+              --notes "FocusLock v3.5 APK assinado! Correções e melhorias: (1) Modo EXTREME como Perfil Nativo: sem overlay persistente sufocando a tela inicial ou popups do sistema — a tela inicial, a Câmera e o Telefone funcionam livremente e de forma 100% nativa; (2) Bloqueio Implacável ao Abrir: qualquer outro app (Instagram, WhatsApp, TikTok, Chrome, Bancos, Jogos, Configurações) é bloqueado na hora com a tela de bloqueio EXTREME; (3) Desbloqueio NFC Perfeito: a Tag NFC EXTREME é lida diretamente sem interferência ou popups travados; (4) Desbloqueio com Senha Forte EXTREME com proteção anti-força bruta; (5) Botão Início na tela de bloqueio para voltar sempre à Home e acessar a Câmera/Telefone com tranquilidade." \
               --latest
           fi

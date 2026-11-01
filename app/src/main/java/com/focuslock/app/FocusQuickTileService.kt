@@ -32,10 +32,10 @@ class FocusQuickTileService : TileService() {
         if (prefs.isExtremeActive) {
             Toast.makeText(
                 this,
-                "🔥 Modo EXTREME ativo! Use a Senha Forte EXTREME ou Tag NFC EXTREME para desbloquear.",
+                "🔥 Modo EXTREME ativo! Use a Senha Forte EXTREME ou Tag NFC EXTREME no FocusLock para desbloquear.",
                 Toast.LENGTH_LONG
             ).show()
-            ExtremeMode.openLockScreen(this)
+            openMainActivityAndCollapse()
             return
         }
 

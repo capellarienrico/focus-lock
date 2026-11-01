@@ -64,7 +64,6 @@ class AppBlockerService : Service() {
 
     private var powerManager: PowerManager? = null
     private var lockOverlay: LockOverlayController? = null
-    private var extremeOverlay: ExtremeOverlayController? = null
     private var floatingPill: FloatingFilterPillController? = null
 
     private val screenStateReceiver = object : BroadcastReceiver() {
@@ -101,9 +100,6 @@ class AppBlockerService : Service() {
             try {
                 val prefs = getPrefs()
 
-                if (!prefs.isExtremeActive && extremeOverlay?.isShowing == true) {
-                    extremeOverlay?.dismiss()
-                }
                 val isBlocking = prefs.isBlockingCurrentlyActive()
                 syncForegroundNotificationIfChanged(isBlocking)
 
@@ -117,10 +113,7 @@ class AppBlockerService : Service() {
                         prefs.floatingPillMode == BlockPreferences.PILL_MODE_HOME_ONLY &&
                         NotificationFilterStore.getInstance(this@AppBlockerService).getActiveCount() > 0
 
-                if (prefs.isExtremeActive) {
-                    nextDelay = 400L
-                    evaluateExtremeMode(prefs)
-                } else if (isBlocking) {
+                if (isBlocking) {
                     nextDelay = 400L
                     val initialLookback = if (!wasBlockingActive) 1_800_000L else 15_000L
                     if (!wasBlockingActive) {
@@ -180,10 +173,6 @@ class AppBlockerService : Service() {
                 launchLockActivitySafely(blockedReason)
             }
         )
-        extremeOverlay = ExtremeOverlayController(
-            serviceContext = this,
-            prefsProvider = { getPrefs() }
-        )
         floatingPill = FloatingFilterPillController(
             serviceContext = this,
             prefsProvider = { getPrefs() }
@@ -239,8 +228,7 @@ class AppBlockerService : Service() {
     }
 
     private fun isLockUiShowing(): Boolean {
-        return LockActivity.isShowing || (lockOverlay?.isShowing == true) ||
-                (extremeOverlay?.isShowing == true) || ExtremeLockActivity.isResumed
+        return LockActivity.isShowing || (lockOverlay?.isShowing == true)
     }
 
     private fun isUsagePermissionAllowedCached(): Boolean {
@@ -481,36 +469,6 @@ class AppBlockerService : Service() {
         return currentForegroundPackage to currentForegroundClass
     }
 
-    /**
-     * Modo EXTREME: tudo fica coberto pelo overlay, exceto Camera e Telefone (e chamadas).
-     * Sem permissao de uso ou sem evento de app em primeiro plano, o padrao e MANTER TRAVADO.
-     */
-    private fun evaluateExtremeMode(prefs: BlockPreferences) {
-        val lookback = if (!wasBlockingActive) 1_800_000L else 15_000L
-        if (!wasBlockingActive) {
-            wasBlockingActive = true
-            FocusQuickTileService.requestListeningStateSafe(this)
-        }
-        floatingPill?.hide()
-
-        var pkg = ""
-        if (isUsagePermissionAllowedCached()) {
-            pkg = queryForegroundPackageAndClassIncremental(lookback).first
-        }
-
-        if (pkg != this.packageName && prefs.isExtremeAllowedPackage(pkg)) {
-            if (extremeOverlay?.isShowing == true) extremeOverlay?.dismiss()
-            return
-        }
-
-        if (extremeOverlay?.isShowing == true) return
-        lockOverlay?.dismiss()
-        val shown = extremeOverlay?.show() == true
-        if (!shown && !ExtremeLockActivity.isResumed) {
-            ExtremeMode.openLockScreen(this)
-        }
-    }
-
     private fun evaluateAndBlockPackage(packageName: String, className: String) {
         if (packageName.isBlank()) return
         if (packageName == this.packageName) return
@@ -651,8 +609,6 @@ class AppBlockerService : Service() {
         usageRefreshExecutor.shutdownNow()
         lockOverlay?.dismiss()
         lockOverlay = null
-        extremeOverlay?.dismiss()
-        extremeOverlay = null
         floatingPill?.hide()
         floatingPill = null
         isRunning = false
@@ -684,7 +640,6 @@ class AppBlockerService : Service() {
         fun dismissOverlay() {
             instance?.handler?.post {
                 instance?.lockOverlay?.dismiss()
-                instance?.extremeOverlay?.dismiss()
             }
         }
 
@@ -714,7 +669,6 @@ class AppBlockerService : Service() {
                 FocusQuickTileService.requestListeningStateSafe(svc)
                 svc.handler.post {
                     svc.lockOverlay?.dismiss()
-                    if (!svc.getPrefs().isExtremeActive) svc.extremeOverlay?.dismiss()
                     svc.syncForegroundNotificationIfChanged(false)
                     svc.updateFloatingPillForCurrentState()
                     svc.restartWatchdogNow()

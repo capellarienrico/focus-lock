@@ -1,16 +1,17 @@
-# FocusLock v3.4 🛡️ — Super App de Foco & Minimalismo Digital
+# FocusLock v3.5 🛡️ — Super App de Foco & Minimalismo Digital
 
 Aplicativo Android nativo (Kotlin) completo para **bloqueio real de distrações**, **Modo EXTREME de bloqueio total**, **filtro minimalista de notificações**, **controle de tempo de tela** e **âncora física via Tag NFC** — projetado para ser **100% compatível com aplicativos de banco** (sem utilizar `AccessibilityService`).
 
 ---
 
-## ✨ O que há de novo no FocusLock v3.4 (Extreme Mode Edition)
+## ✨ O que há de novo no FocusLock v3.5 (Extreme Mode Edition)
 
-### 🔥 Modo EXTREME (Bloqueio Total do Aparelho)
-- **Celular 100% Travado**: bloqueia todo o aparelho instantaneamente, permitindo **exclusivamente a Câmera e o Telefone/chamadas de emergência**.
-- **Chave de Saída Forte e Independente**: a Senha Mestre comum **não** desbloqueia o Modo EXTREME. Apenas uma **Senha Forte EXTREME** (mínimo 10 caracteres misturando maiúsculas, minúsculas, números e símbolos) ou uma **Tag NFC EXTREME dedicada** cadastrada à parte consegue desativar o bloqueio.
-- **Proteção Anti-Força Bruta**: tentativas erradas consecutivas ativam atraso progressivo (30s até 10 minutos).
-- **Ativação / Desativação Ágil**: toque na Tag NFC EXTREME para alternar o modo a qualquer momento ou utilize o botão com confirmação no app / atalho no Quick Tile.
+### 🔥 Modo EXTREME Nativo (Zero Overlay na Tela Inicial)
+- **Perfil Pré-Definido de Dumbphone**: sem janela de sobreposição persistente sufocando a tela inicial ou popups do Android. A tela inicial (Home/Launcher), a **Câmera** e o **Telefone/Discador** funcionam com total liberdade e fluidez nativa.
+- **Bloqueio Implacável ao Abrir Qualquer Outro App**: qualquer tentativa de abrir WhatsApp, Instagram, TikTok, Chrome, Bancos, Jogos ou Configurações aciona imediatamente a tela de bloqueio do FocusLock.
+- **Saída Segura e Independente**: a Senha Mestre comum **não** desativa o Modo EXTREME. Exige a **Senha Forte EXTREME** (mínimo 10 caracteres mesclando maiúsculas, minúsculas, dígitos e símbolos com proteção anti-força bruta) ou a **Tag NFC EXTREME dedicada**.
+- **Desbloqueio NFC sem Conflito**: a Tag NFC EXTREME é lida pelo aplicativo sem que nenhum overlay roube o toque ou trave os diálogos do sistema operacional.
+- **Botão Início Sempre Disponível**: se você abrir um app bloqueado por engano, toque em "Início" para voltar direto à tela inicial e abrir a Câmera ou Telefone com calma.
 
 ---
 
@@ -50,7 +51,7 @@ Aplicativo Android nativo (Kotlin) completo para **bloqueio real de distrações
 
 ## 📲 Como Instalar e Configurar
 
-1. Baixe o **`FocusLock.apk`** mais recente em [**GitHub Releases (v3.4)**](https://github.com/capellarienrico/focus-lock/releases/latest) *(se você instalou uma versão anterior com assinatura diferente, desinstale a antiga antes de instalar)*.
+1. Baixe o **`FocusLock.apk`** mais recente em [**GitHub Releases (v3.5)**](https://github.com/capellarienrico/focus-lock/releases/latest) *(se você instalou uma versão anterior com assinatura diferente, desinstale a antiga antes de instalar)*.
 2. Abra o app e crie sua **Senha Mestre**.
 3. Conceda as permissões indicadas no painel:
    - **Acesso ao Uso de Apps** (detectar app em primeiro plano e calcular tempo de tela).

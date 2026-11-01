@@ -178,6 +178,30 @@ class LockOverlayController(
         b.btnUnlockWithPin.setOnClickListener {
             val enteredPin = b.etPin.text?.toString()?.trim() ?: ""
             val prefs = prefsProvider()
+
+            if (prefs.isExtremeActive) {
+                val remaining = prefs.extremeLockoutRemainingMs()
+                if (remaining > 0) {
+                    vibrateError()
+                    b.tvError.text = "Muitas tentativas erradas. Aguarde ${remaining / 1000 + 1}s."
+                    b.tvError.visibility = View.VISIBLE
+                    return@setOnClickListener
+                }
+                if (prefs.verifyExtremePassword(enteredPin)) {
+                    b.tvError.visibility = View.GONE
+                    hideKeyboard(b.etPin)
+                    ExtremeMode.deactivate(serviceContext)
+                    Toast.makeText(serviceContext, "Modo EXTREME desativado!", Toast.LENGTH_SHORT).show()
+                    dismiss()
+                } else {
+                    vibrateError()
+                    b.tvError.text = "Senha Forte EXTREME incorreta."
+                    b.tvError.visibility = View.VISIBLE
+                    b.etPin.text?.clear()
+                }
+                return@setOnClickListener
+            }
+
             val masterPin = prefs.masterPin
 
             if (enteredPin.isNotEmpty() && enteredPin == masterPin) {
@@ -288,11 +312,20 @@ class LockOverlayController(
     private fun applyStrictnessModeUI(b: ActivityLockBinding) {
         mindfulTimer?.cancel()
         val prefs = prefsProvider()
-        val mode = prefs.strictnessMode
 
         b.llCognitiveSection.visibility = View.GONE
         b.llSnoozeSection.visibility = View.GONE
         b.tvError.visibility = View.GONE
+
+        if (prefs.isExtremeActive) {
+            b.llMindfulSection.visibility = View.GONE
+            b.llPinSection.visibility = View.VISIBLE
+            b.etPin.hint = "Senha Forte EXTREME"
+            b.tvNfcPrompt.text = "Aproxime a Tag NFC EXTREME para desbloquear"
+            return
+        }
+
+        val mode = prefs.strictnessMode
 
         when (mode) {
             BlockPreferences.MODE_DEEP_FOCUS_NFC -> {
@@ -342,6 +375,13 @@ class LockOverlayController(
     private fun updateBlockedAppLabel(b: ActivityLockBinding, pkg: String) {
         val prefs = prefsProvider()
         val attempts = prefs.getBlockedAttemptsToday()
+        if (prefs.isExtremeActive) {
+            b.tvBlockedStats.text = "🔥 MODO EXTREME ATIVO • Celular Bloqueado"
+            b.tvCustomQuote.text = "Apenas Câmera e Telefone permitidos."
+            b.tvBlockedAppTitle.text = "Aplicativo Bloqueado pelo Modo EXTREME"
+            b.tvDailyBudgetStatus.visibility = View.GONE
+            return
+        }
         b.tvBlockedStats.text = "🛡️ $attempts tentativa(s) de distração bloqueada(s) hoje"
         b.tvCustomQuote.text = "\"${prefs.customLockQuote}\""
 

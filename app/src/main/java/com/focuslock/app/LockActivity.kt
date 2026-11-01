@@ -123,6 +123,18 @@ class LockActivity : AppCompatActivity() {
     private fun applyStrictnessModeUI() {
         mindfulTimer?.cancel()
         val prefs = (application as FocusLockApp).prefs
+
+        if (prefs.isExtremeActive) {
+            binding.llMindfulSection.visibility = View.GONE
+            binding.llPinSection.visibility = View.VISIBLE
+            binding.etPin.hint = "Senha Forte EXTREME"
+            binding.tvBlockedStats.text = "🔥 MODO EXTREME ATIVO"
+            binding.tvLockQuote.text = "Apenas Câmera e Telefone permitidos."
+            binding.tvBlockedAppTitle.text = "Aplicativo Bloqueado pelo Modo EXTREME"
+            binding.tvNfcPrompt.text = "Aproxime a Tag NFC EXTREME para desbloquear"
+            return
+        }
+
         val mode = prefs.strictnessMode
 
         when (mode) {
@@ -248,6 +260,20 @@ class LockActivity : AppCompatActivity() {
         val tagId = bytesToHex(tag.id)
         val prefs = (application as FocusLockApp).prefs
 
+        if (prefs.isExtremeActive) {
+            if (prefs.isExtremeNfcTag(tagId)) {
+                ExtremeMode.deactivate(this)
+                vibrateSuccess()
+                Toast.makeText(this, "Modo EXTREME desativado via NFC!", Toast.LENGTH_SHORT).show()
+                finish()
+            } else {
+                vibrateError()
+                binding.tvError.text = "Esta não é a Tag NFC EXTREME."
+                binding.tvError.visibility = View.VISIBLE
+            }
+            return
+        }
+
         if (prefs.isNfcTagAllowed(tagId)) {
             val tagName = prefs.findNfcTagName(tagId) ?: "Tag NFC"
             unlockSuccess("Desbloqueado via $tagName!", viaNfc = true)
@@ -262,6 +288,29 @@ class LockActivity : AppCompatActivity() {
         binding.btnUnlockWithPin.setOnClickListener {
             val enteredPin = binding.etPin.text?.toString()?.trim() ?: ""
             val prefs = (application as FocusLockApp).prefs
+
+            if (prefs.isExtremeActive) {
+                val remaining = prefs.extremeLockoutRemainingMs()
+                if (remaining > 0) {
+                    vibrateError()
+                    binding.tvError.text = "Muitas tentativas erradas. Aguarde ${remaining / 1000 + 1}s."
+                    binding.tvError.visibility = View.VISIBLE
+                    return@setOnClickListener
+                }
+                if (prefs.verifyExtremePassword(enteredPin)) {
+                    ExtremeMode.deactivate(this)
+                    vibrateSuccess()
+                    Toast.makeText(this, "Modo EXTREME desativado!", Toast.LENGTH_SHORT).show()
+                    finish()
+                } else {
+                    vibrateError()
+                    binding.tvError.text = "Senha Forte EXTREME incorreta."
+                    binding.tvError.visibility = View.VISIBLE
+                    binding.etPin.text?.clear()
+                }
+                return@setOnClickListener
+            }
+
             val masterPin = prefs.masterPin
 
             if (enteredPin.isNotEmpty() && enteredPin == masterPin) {

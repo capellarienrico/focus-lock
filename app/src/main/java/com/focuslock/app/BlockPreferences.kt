@@ -565,17 +565,33 @@ class BlockPreferences(private val appContext: Context) {
     @Volatile
     private var cachedExtremeAllowedAt: Long = 0L
 
-    /** Pacotes liberados no EXTREME: Camera e Telefone/chamadas/emergencia. */
+    /** Pacotes liberados no EXTREME: Camera, Telefone/chamadas, Home (Tela Inicial), Teclado e FocusLock. */
     fun isExtremeAllowedPackage(packageName: String): Boolean {
         if (packageName.isBlank()) return false
         val lower = packageName.lowercase()
-        if (lower == "com.android.phone" ||
-            lower == "com.android.server.telecom" ||
+
+        // O próprio aplicativo FocusLock
+        if (packageName == appContext.packageName || lower.startsWith("com.focuslock")) return true
+
+        // Tela Inicial (Launcher nativo) - celular livre para tocar na câmera/telefone/focuslock
+        if (isHomeLauncherPackage(packageName)) return true
+
+        // Interface do sistema Android
+        if (packageName == "com.android.systemui" || packageName == "android") return true
+
+        // Teclados e IMEs do sistema (necessário para digitar a senha no bloqueador)
+        if (getDynamicSystemAllowedPackages().contains(packageName)) return true
+
+        // Telefone, Discador, Telecom, Incall e chamadas de emergência
+        if (packageName == "com.android.phone" ||
+            packageName == "com.android.server.telecom" ||
             lower.contains("dialer") ||
             lower.contains("telecom") ||
             lower.contains("incall") ||
             lower.contains("emergency")
         ) return true
+
+        // Câmera
         val now = System.currentTimeMillis()
         if (now - cachedExtremeAllowedAt > 60_000L || cachedExtremeAllowed.isEmpty()) {
             val result = mutableSetOf<String>()
@@ -609,6 +625,12 @@ class BlockPreferences(private val appContext: Context) {
      */
     fun shouldBlockNow(packageName: String): Boolean {
         if (packageName.isBlank()) return false
+
+        // 0. Modo EXTREME ativo: Perfil pré-definido onde TUDO é bloqueado,
+        // exceto Câmera, Telefone/emergência, Tela Inicial, Teclado e FocusLock.
+        if (isExtremeActive) {
+            return !isExtremeAllowedPackage(packageName)
+        }
 
         // 1. Apps que NUNCA podem ser bloqueados (WhatsApp, Bancos, Telefone, Teclado, Launcher, FocusLock)
         if (isAlwaysAllowed(packageName)) {

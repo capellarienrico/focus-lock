@@ -83,18 +83,6 @@
             android:turnScreenOn="true"
             android:theme="@style/Theme.FocusLock.LockScreen" />
 
-        <!-- Extreme Lock Screen Activity -->
-        <activity
-            android:name=".ExtremeLockActivity"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:launchMode="singleTask"
-            android:taskAffinity=""
-            android:windowSoftInputMode="stateHidden|adjustResize"
-            android:showWhenLocked="true"
-            android:turnScreenOn="true"
-            android:theme="@style/Theme.FocusLock.LockScreen" />
-
         <!-- Smart Categorized & Sortable App Picker Activity -->
         <activity
             android:name=".AppPickerActivity"
