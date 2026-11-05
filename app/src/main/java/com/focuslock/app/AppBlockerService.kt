@@ -69,9 +69,10 @@ class AppBlockerService : Service() {
             when (intent?.action) {
                 Intent.ACTION_SCREEN_OFF -> {
                     isScreenInteractive = false
-                    // Pausa completamente o loop de monitoramento enquanto a tela está desligada (0% CPU)
-                    handler.removeCallbacks(watchdogRunnable)
                     floatingPill?.hide()
+                    // Pausa polling rápido e mantém standby leve a cada 5s (0% CPU, sem wakelock)
+                    handler.removeCallbacks(watchdogRunnable)
+                    handler.postDelayed(watchdogRunnable, 5_000L)
                 }
                 Intent.ACTION_SCREEN_ON,
                 Intent.ACTION_USER_PRESENT -> {
@@ -84,13 +85,21 @@ class AppBlockerService : Service() {
 
     private val watchdogRunnable = object : Runnable {
         override fun run() {
-            // Se a tela está desligada, não reagenda o loop (aguarda ACTION_SCREEN_ON)
-            val screenOnNow = isScreenInteractive && (powerManager?.isInteractive ?: true)
-            if (!screenOnNow) {
+            val pmInteractive = powerManager?.isInteractive ?: true
+            if (!pmInteractive) {
+                // Tela apagada: esconde a pílula flutuante e aguarda em standby leve de 5s.
+                // Se acabamos de receber ACTION_SCREEN_ON e o hardware do display ainda está
+                // finalizando o wake-up, tenta novamente rapidamente em 250ms em vez de dormir 5s.
+                val retryDelay = if (isScreenInteractive) 250L else 5_000L
                 isScreenInteractive = false
                 floatingPill?.hide()
+                handler.removeCallbacks(this)
+                handler.postDelayed(this, retryDelay)
                 return
             }
+
+            // Tela garantidamente ligada
+            isScreenInteractive = true
 
             var nextDelay = 15_000L
             try {
@@ -172,9 +181,7 @@ class AppBlockerService : Service() {
         )
         val prefs = getPrefs()
         startForegroundSafely(prefs.isBlockingCurrentlyActive())
-        if (isScreenInteractive) {
-            restartWatchdogNow()
-        }
+        restartWatchdogNow()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -184,9 +191,7 @@ class AppBlockerService : Service() {
         isScreenInteractive = powerManager?.isInteractive ?: true
         ServiceHeartbeat.schedule(this)
         startForegroundSafely(getPrefs().isBlockingCurrentlyActive())
-        if (isScreenInteractive) {
-            restartWatchdogNow()
-        }
+        restartWatchdogNow()
         return START_STICKY
     }
 
@@ -211,9 +216,7 @@ class AppBlockerService : Service() {
 
     private fun restartWatchdogNow() {
         handler.removeCallbacks(watchdogRunnable)
-        if (isScreenInteractive) {
-            handler.post(watchdogRunnable)
-        }
+        handler.post(watchdogRunnable)
     }
 
     private fun getPrefs(): BlockPreferences {
@@ -668,8 +671,9 @@ class AppBlockerService : Service() {
             }
         }
 
-        fun notifyStateChanged() {
-            instance?.let { svc ->
+        fun notifyStateChanged(context: Context? = null) {
+            val svc = instance
+            if (svc != null) {
                 svc.lastUsagePermCheckMillis = 0L
                 if (FocusLockApp.isNonLockActivityInForeground) {
                     svc.currentForegroundPackage = svc.packageName
@@ -681,6 +685,8 @@ class AppBlockerService : Service() {
                 svc.handler.post {
                     svc.restartWatchdogNow()
                 }
+            } else if (context != null) {
+                ensureRunning(context)
             }
         }
 

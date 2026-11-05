@@ -1,17 +1,15 @@
-# FocusLock v3.5 🛡️ — Super App de Foco & Minimalismo Digital
+# FocusLock v3.7 🛡️ — Super App de Foco & Minimalismo Digital
 
 Aplicativo Android nativo (Kotlin) completo para **bloqueio real de distrações**, **Modo EXTREME de bloqueio total**, **filtro minimalista de notificações**, **controle de tempo de tela** e **âncora física via Tag NFC** — projetado para ser **100% compatível com aplicativos de banco** (sem utilizar `AccessibilityService`).
 
 ---
 
-## ✨ O que há de novo no FocusLock v3.5 (Extreme Mode Edition)
+## ✨ O que há de novo no FocusLock v3.7 (Estabilidade & Persistência)
 
-### 🔥 Modo EXTREME Nativo (Zero Overlay na Tela Inicial)
-- **Perfil Pré-Definido de Dumbphone**: sem janela de sobreposição persistente sufocando a tela inicial ou popups do Android. A tela inicial (Home/Launcher), a **Câmera** e o **Telefone/Discador** funcionam com total liberdade e fluidez nativa.
-- **Bloqueio Implacável ao Abrir Qualquer Outro App**: qualquer tentativa de abrir WhatsApp, Instagram, TikTok, Chrome, Bancos, Jogos ou Configurações aciona imediatamente a tela de bloqueio do FocusLock.
-- **Saída Segura e Independente**: a Senha Mestre comum **não** desativa o Modo EXTREME. Exige a **Senha Forte EXTREME** (mínimo 10 caracteres mesclando maiúsculas, minúsculas, dígitos e símbolos com proteção anti-força bruta) ou a **Tag NFC EXTREME dedicada**.
-- **Desbloqueio NFC sem Conflito**: a Tag NFC EXTREME é lida pelo aplicativo sem que nenhum overlay roube o toque ou trave os diálogos do sistema operacional.
-- **Botão Início Sempre Disponível**: se você abrir um app bloqueado por engano, toque em "Início" para voltar direto à tela inicial e abrir a Câmera ou Telefone com calma.
+- **Loop Watchdog Imparável**: eliminada a condição de corrida entre o sensor de tela e o `PowerManager` que fazia o loop de bloqueio encerrar silenciosamente após desbloquear o celular.
+- **Filtro de Notificações Blindado**: rebind inteligente com alternância de componente no PackageManager, impedindo que o Android desconecte silenciosamente a captura de notificações e a caixa de entrada minimalista.
+- **Auto-Recuperação & Imunidade a Limpeza de Tarefas**: adição de `android:stopWithTask="false"`, alarmes exatos com `SCHEDULE_EXACT_ALARM` e `WAKE_LOCK` para manter o serviço vivo mesmo após fechar os apps recentes.
+- **Diagnóstico Transparente**: o card de integridade na Home exibe em tempo real o status de conexão do filtro de notificações e do motor de bloqueio.
 
 ---
 

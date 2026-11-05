@@ -27,6 +27,7 @@ class FocusNotificationListenerService : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         isConnected = true
+        Log.i("FocusNotifFilter", "FocusNotificationListenerService conectado ao sistema com sucesso.")
         // Religa o monitor de bloqueio caso o processo tenha sido morto e só o listener tenha voltado
         AppBlockerService.ensureRunning(applicationContext)
         ServiceHeartbeat.schedule(applicationContext)
@@ -35,9 +36,12 @@ class FocusNotificationListenerService : NotificationListenerService() {
 
     override fun onListenerDisconnected() {
         isConnected = false
-        // O sistema às vezes desconecta o listener e não o religa sozinho: pede rebind explicitamente
-        ServiceHeartbeat.requestListenerRebindIfNeeded(applicationContext)
+        Log.w("FocusNotifFilter", "FocusNotificationListenerService desconectado. Agendando re-conexão...")
         super.onListenerDisconnected()
+        // O sistema às vezes desconecta o listener durante unbind: aguarda 1.5s antes do rebind
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            ServiceHeartbeat.requestListenerRebindIfNeeded(applicationContext)
+        }, 1500L)
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
@@ -46,6 +50,11 @@ class FocusNotificationListenerService : NotificationListenerService() {
         if (pkg == this.packageName) return
 
         try {
+            // Se o monitor de bloqueio tiver sido morto, o listener (que é mantido pelo sistema) o ressuscita
+            if (!AppBlockerService.isRunning) {
+                AppBlockerService.ensureRunning(applicationContext)
+            }
+
             val prefs = (application as? FocusLockApp)?.prefs ?: BlockPreferences(applicationContext)
             if (!prefs.shouldFilterNotificationsNow()) return
 
@@ -81,12 +90,16 @@ class FocusNotificationListenerService : NotificationListenerService() {
             val textLines = extras?.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
                 ?.joinToString("\n") { it.toString().trim() }
                 ?.takeIf { it.isNotBlank() }
+            val subText = extras?.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.trim()
+            val ticker = notif.tickerText?.toString()?.trim()
 
             val body = when {
                 !bigText.isNullOrBlank() -> bigText
                 !normalText.isNullOrBlank() -> normalText
                 !textLines.isNullOrBlank() -> textLines
-                else -> ""
+                !subText.isNullOrBlank() -> subText
+                !ticker.isNullOrBlank() -> ticker
+                else -> "Nova notificação"
             }
 
             val appName = try {
@@ -97,16 +110,14 @@ class FocusNotificationListenerService : NotificationListenerService() {
             }
 
             val store = NotificationFilterStore.getInstance(applicationContext)
-            if (title.isNotBlank() || body.isNotBlank()) {
-                store.addFilteredNotification(
-                    packageName = pkg,
-                    appName = appName,
-                    title = title.ifBlank { appName },
-                    text = body,
-                    timestamp = if (sbn.postTime > 0L) sbn.postTime else System.currentTimeMillis(),
-                    contentIntent = notif.contentIntent
-                )
-            }
+            store.addFilteredNotification(
+                packageName = pkg,
+                appName = appName,
+                title = title.ifBlank { appName },
+                text = body,
+                timestamp = if (sbn.postTime > 0L) sbn.postTime else System.currentTimeMillis(),
+                contentIntent = notif.contentIntent
+            )
 
             // Remove silenciosamente a notificação original da barra de status
             cancelNotification(sbn.key)

@@ -165,6 +165,11 @@ class MainActivity : AppCompatActivity() {
         updateUI()
         refreshWellbeingAsync()
 
+        AppBlockerService.ensureRunning(this)
+        AppBlockerService.notifyStateChanged(this)
+        ServiceHeartbeat.schedule(this)
+        ServiceHeartbeat.requestListenerRebindIfNeeded(this)
+
         FocusNotificationListenerService.syncSummaryNotification(this)
         nfcAdapter?.enableForegroundDispatch(this, pendingIntent, null, null)
     }
@@ -2383,14 +2388,20 @@ class MainActivity : AppCompatActivity() {
     private fun updateSystemDiagnosticsCard() {
         val usageOk = AppBlockerService.isServiceEnabled(this)
         val overlayOk = Settings.canDrawOverlays(this)
-        val notifOk = FocusNotificationListenerService.isNotificationAccessEnabled(this)
+        val notifPermOk = FocusNotificationListenerService.isNotificationAccessEnabled(this)
+        val notifConnected = FocusNotificationListenerService.isConnected
         val batteryOk = isBatteryOptimizationIgnored()
         val serviceOk = AppBlockerService.isRunning
 
         val sb = StringBuilder()
         sb.appendLine("${if (usageOk) "✅" else "⚠️"} Acesso ao Uso (UsageStats): ${if (usageOk) "Ativo" else "Pendente"}")
         sb.appendLine("${if (overlayOk) "✅" else "⚠️"} Sobreposição de Tela (Overlay): ${if (overlayOk) "Ativa" else "Pendente"}")
-        sb.appendLine("${if (notifOk) "✅" else "ℹ️"} Filtro de Notificações: ${if (notifOk) "Permitido" else "Opcional (desativado)"}")
+        val notifStatus = when {
+            notifConnected -> "Ativo e Conectado"
+            notifPermOk -> "Permitido (Reconectando...)"
+            else -> "Opcional (desativado)"
+        }
+        sb.appendLine("${if (notifPermOk) "✅" else "ℹ️"} Filtro de Notificações: $notifStatus")
         sb.appendLine("${if (batteryOk) "✅" else "⚠️"} Execução sem Restrição de Bateria: ${if (batteryOk) "Otimizada" else "Recomendado ativar"}")
         sb.append("${if (serviceOk) "✅" else "ℹ️"} Motor em Segundo Plano: ${if (serviceOk) "Rodando" else "Aguardando permissão"}")
         binding.tvSystemHealthChecklist.text = sb.toString()

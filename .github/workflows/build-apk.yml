@@ -58,17 +58,17 @@ jobs:
           name: FocusLock-Debug-APK
           path: app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Publish GitHub Release v3.6
+      - name: Publish GitHub Release v3.7
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if gh release view v3.6 >/dev/null 2>&1; then
-            gh release upload v3.6 FocusLock.apk --clobber
+          if gh release view v3.7 >/dev/null 2>&1; then
+            gh release upload v3.7 FocusLock.apk --clobber
           else
-            gh release create v3.6 FocusLock.apk \
-              --title "FocusLock v3.6 — Correção Crítica de Detecção de Apps e Modo EXTREME Implacável" \
-              --notes "FocusLock v3.6 APK assinado! Correções fundamentais: (1) Detecção de Apps Infalível: corrigido problema com janela de eventos de uso do Android que causava perda de eventos em trocas de tela; (2) Modo EXTREME Seguro e Restrito: bloqueio garantido de todos os apps distrativos, mantendo 100% livres apenas Tela Inicial nativa, Câmera padrão, Telefone/emergência e NFC; (3) Estabilidade do Bloqueador: retorno suave à tela inicial sem loops ou perda de rastreamento." \
+            gh release create v3.7 FocusLock.apk \
+              --title "FocusLock v3.7 — Blindagem Definitiva do Motor em Segundo Plano e Filtro de Notificações" \
+              --notes "FocusLock v3.7 APK assinado! Correções vitais de estabilidade e persistência: (1) Loop Watchdog Imparável: corrigida condição de corrida no reacender da tela que encerrava prematuramente o monitoramento do bloqueador; (2) Re-conexão do Filtro de Notificações: alternância forçada de componente do sistema e rebind automático para garantir que a caixa e o resumo de notificações continuem capturando sem parar; (3) Auto-recuperação (ServiceHeartbeat com alarme exato e stopWithTask=false): prevenção contra congelamento de processos em segundo plano pelo Android/OEMs; (4) Diagnóstico aprimorado na tela inicial." \
               --latest
           fi

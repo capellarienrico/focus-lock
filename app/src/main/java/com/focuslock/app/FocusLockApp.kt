@@ -58,6 +58,8 @@ class FocusLockApp : Application() {
             }
         })
         AppBlockerService.ensureRunning(this)
+        ServiceHeartbeat.schedule(this)
+        ServiceHeartbeat.requestListenerRebindIfNeeded(this)
     }
 
     companion object {

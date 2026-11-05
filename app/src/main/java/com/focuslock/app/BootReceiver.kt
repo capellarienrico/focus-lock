@@ -13,6 +13,8 @@ class BootReceiver : BroadcastReceiver() {
             "android.intent.action.QUICKBOOT_POWERON",
             ACTION_RESTART_SERVICE -> {
                 AppBlockerService.ensureRunning(context)
+                ServiceHeartbeat.schedule(context)
+                ServiceHeartbeat.requestListenerRebindIfNeeded(context)
                 FocusNotificationListenerService.syncSummaryNotification(context)
             }
             ACTION_HEARTBEAT -> {
